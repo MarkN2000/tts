@@ -3,96 +3,118 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>ユーザー辞書</title>
-  <link rel="stylesheet" href="/dictionary.css">
-  <script src="/dictionary.js" defer></script>
+  <title>設定</title>
+  <link rel="stylesheet" href="/settings.css">
+  <script src="/settings.js" defer></script>
 </head>
 <body class="admin-page">
   <main class="admin-card">
     <p class="eyebrow">TTS SERVER</p>
-    <h1>ユーザー辞書</h1>
-    <p class="lead">VOICEVOX / AivisSpeech 共通の単語を編集します。</p>
+    <h1>設定</h1>
+    <p class="lead">リンクの確認、ユーザー辞書の編集、サーバーのアップデートを行います。</p>
 
-    <div class="admin-actions">
-      <button id="reload-button" class="secondary-button" type="button">辞書を再読み込み</button>
-      <button id="add-button" type="button">単語を追加</button>
-    </div>
-    <p id="status" class="status" role="status" aria-live="polite">読み込み中です…</p>
-    <p id="error" class="status error" role="alert"></p>
-    <p id="excluded-note" class="admin-help excluded-note" hidden>
-      AivisSpeech固有の複合語・品詞は、この画面の編集対象に含まれません。
-    </p>
-
-    <section id="update-panel" class="update-panel" aria-labelledby="update-title" hidden>
-      <div class="list-heading">
-        <h2 id="update-title">サーバー更新</h2>
-        <span id="current-version" class="word-count"></span>
+    <section class="settings-section" aria-labelledby="links-title">
+      <h2 id="links-title">リンク</h2>
+      <p class="section-description">音声生成画面と公開APIの接続先です。</p>
+      <div class="link-list">
+        <a class="settings-link" href="/webui">
+          <strong>音声生成 Web UI</strong>
+          <span>話者とテキストを選んで音声を生成します。</span>
+        </a>
+        <div class="link-item">
+          <strong>公開 TTS API（POST）</strong>
+          <code id="public-tts-url" aria-live="polite">読み込み中…</code>
+        </div>
+        <a class="settings-link" href="/speakers">
+          <strong>話者一覧 API（GET）</strong>
+          <span>Engineから取得した話者とスタイルのJSONを表示します。</span>
+        </a>
       </div>
-      <p class="field-note">GitHubの最新リリースを確認し、実行ファイルを更新して再起動します。</p>
-      <div class="admin-actions update-actions">
-        <button id="check-update-button" class="secondary-button" type="button">アップデートを確認</button>
-        <button id="apply-update-button" type="button" hidden>更新して再起動</button>
-      </div>
-      <p id="update-status" class="status" role="status" aria-live="polite"></p>
-      <p id="update-error" class="status error" role="alert"></p>
+      <p id="links-error" class="status error" role="alert"></p>
     </section>
 
-    <form id="word-form" class="word-form" novalidate hidden>
-      <h2 id="editor-title">単語を追加</h2>
-      <input id="word-uuid" type="hidden">
+    <section class="settings-section" aria-labelledby="dictionary-title">
+      <h2 id="dictionary-title">ユーザー辞書</h2>
+      <p class="section-description">VOICEVOX / AivisSpeech 共通の単語を編集します。</p>
+      <div class="admin-actions">
+        <button id="reload-button" class="secondary-button" type="button">辞書を再読み込み</button>
+        <button id="add-button" type="button">単語を追加</button>
+      </div>
+      <p id="status" class="status" role="status" aria-live="polite">読み込み中です…</p>
+      <p id="error" class="status error" role="alert"></p>
+      <p id="excluded-note" class="section-description excluded-note" hidden>
+        AivisSpeech固有の複合語・品詞は、この画面の編集対象に含まれません。
+      </p>
 
-      <label for="surface">単語</label>
-      <input id="surface" name="surface" type="text" required autocomplete="off">
+      <form id="word-form" class="word-form" novalidate hidden>
+        <h3 id="editor-title">単語を追加</h3>
+        <input id="word-uuid" type="hidden">
 
-      <label for="pronunciation">読み（カタカナ）</label>
-      <input id="pronunciation" name="pronunciation" type="text" required pattern="[ァ-ヴー]+" autocomplete="off" aria-describedby="pronunciation-note">
-      <p id="pronunciation-note" class="field-note">ひらがなは入力確定後にカタカナへ変換されます。</p>
+        <label for="surface">単語</label>
+        <input id="surface" name="surface" type="text" required autocomplete="off">
 
-      <fieldset class="accent-field">
-        <legend>アクセント</legend>
-        <input id="accent-type" name="accent_type" type="hidden" value="0">
-        <p id="accent-empty" class="accent-empty">読みを入力すると選択できます。</p>
-        <div id="accent-picker" hidden>
-          <div class="accent-viewport">
-            <div id="accent-track" class="accent-track">
-              <input id="accent-slider" class="accent-slider" type="range" min="1" max="2" step="1" value="2" aria-label="アクセント位置">
-              <div id="accent-diagram"></div>
-              <div id="accent-labels" class="accent-labels"></div>
+        <label for="pronunciation">読み（カタカナ）</label>
+        <input id="pronunciation" name="pronunciation" type="text" required pattern="[ァ-ヴー]+" autocomplete="off" aria-describedby="pronunciation-note">
+        <p id="pronunciation-note" class="field-note">ひらがなは入力確定後にカタカナへ変換されます。</p>
+
+        <fieldset class="accent-field">
+          <legend>アクセント</legend>
+          <input id="accent-type" name="accent_type" type="hidden" value="0">
+          <p id="accent-empty" class="accent-empty">読みを入力すると選択できます。</p>
+          <div id="accent-picker" hidden>
+            <div class="accent-viewport">
+              <div id="accent-track" class="accent-track">
+                <input id="accent-slider" class="accent-slider" type="range" min="1" max="2" step="1" value="2" aria-label="アクセント位置">
+                <div id="accent-diagram"></div>
+                <div id="accent-labels" class="accent-labels"></div>
+              </div>
             </div>
           </div>
+        </fieldset>
+
+        <label for="word-type">品詞</label>
+        <select id="word-type" name="word_type">
+          <option value="PROPER_NOUN">固有名詞</option>
+          <option value="COMMON_NOUN">普通名詞</option>
+          <option value="VERB">動詞</option>
+          <option value="ADJECTIVE">形容詞</option>
+          <option value="SUFFIX">接尾辞</option>
+        </select>
+
+        <label for="priority">優先度</label>
+        <div class="priority-control">
+          <input id="priority" name="priority" type="range" min="0" max="10" step="1" value="5">
+          <output id="priority-value" for="priority">5</output>
         </div>
-      </fieldset>
 
-      <label for="word-type">品詞</label>
-      <select id="word-type" name="word_type">
-        <option value="PROPER_NOUN">固有名詞</option>
-        <option value="COMMON_NOUN">普通名詞</option>
-        <option value="VERB">動詞</option>
-        <option value="ADJECTIVE">形容詞</option>
-        <option value="SUFFIX">接尾辞</option>
-      </select>
+        <p class="field-note">試し読みでは辞書を変更せず、入力中の読みとアクセントだけを確認します。</p>
+        <div class="form-actions">
+          <button id="cancel-button" class="secondary-button" type="button">キャンセル</button>
+          <button id="preview-button" class="secondary-button" type="button">この読みで試聴</button>
+          <button id="save-button" type="submit">辞書に追加</button>
+        </div>
+      </form>
 
-      <label for="priority">優先度</label>
-      <div class="priority-control">
-        <input id="priority" name="priority" type="range" min="0" max="10" step="1" value="5">
-        <output id="priority-value" for="priority">5</output>
-      </div>
-
-      <p class="field-note">試し読みでは辞書を変更せず、入力中の読みとアクセントだけを確認します。</p>
-      <div class="form-actions">
-        <button id="cancel-button" class="secondary-button" type="button">キャンセル</button>
-        <button id="preview-button" class="secondary-button" type="button">この読みで試聴</button>
-        <button id="save-button" type="submit">辞書に追加</button>
-      </div>
-    </form>
-
-    <section class="dictionary" aria-labelledby="list-title">
-      <div class="list-heading">
-        <h2 id="list-title">登録単語</h2>
+      <div class="list-heading word-list-heading">
+        <h3 id="list-title">登録単語</h3>
         <span id="word-count" class="word-count"></span>
       </div>
       <p id="empty-message" class="empty-message" hidden>編集できる単語は登録されていません。</p>
-      <div id="word-list" class="word-list" aria-live="polite"></div>
+      <div id="word-list" class="word-list" aria-labelledby="list-title" aria-live="polite"></div>
+    </section>
+
+    <section id="update-panel" class="settings-section" aria-labelledby="update-title">
+      <div class="list-heading">
+        <h2 id="update-title">アップデート</h2>
+        <span id="current-version" class="word-count"></span>
+      </div>
+      <p class="section-description">GitHubの最新リリースを確認し、実行ファイルを更新して再起動します。</p>
+      <div class="admin-actions update-actions">
+        <button id="check-update-button" class="secondary-button" type="button" hidden>アップデートを確認</button>
+        <button id="apply-update-button" type="button" hidden>更新して再起動</button>
+      </div>
+      <p id="update-status" class="status" role="status" aria-live="polite">バージョンを確認しています…</p>
+      <p id="update-error" class="status error" role="alert"></p>
     </section>
   </main>
 </body>

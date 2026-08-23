@@ -66,18 +66,37 @@ GET /speakers
 
 ### LAN 内管理画面
 
-音声生成 Web UI と辞書編集用の画面・API は、公開 API と別の `admin_listen` で提供する。
+音声生成 Web UI と設定画面・管理 API は、公開 API と別の `admin_listen` で提供する。
 
 ```http
 GET /webui
-GET /dictionary
+GET /settings
 ```
 
 - 画面の HTML、CSS、JavaScript は実行ファイルへ埋め込み、追加ファイルとして配布しない。
 - `admin_listen` にはプライベート IPv4、ループバックアドレス、または IPv6 のユニークローカルアドレスだけを指定できる。
 - Cloudflare Tunnel は公開用の `listen` だけへ接続し、`admin_listen` は公開しない。
-- 公開用の `listen` では、管理画面、Web UI 用の音声生成 API、次の辞書 API を提供しない。
+- 公開用の `listen` では、設定画面、Web UI 用の音声生成 API、次の管理 API を提供しない。
 - LAN 外からの直接接続は OS のファイアウォールでも拒否する。
+
+#### 設定画面
+
+`GET /settings` では、リンク、ユーザー辞書、アップデートを同じ画面に表示する。旧 `GET /dictionary` は提供しない。
+
+```http
+GET /api/settings
+```
+
+実行中の設定から、画面へ表示するリンクを返す。
+
+```json
+{
+  "public_tts_url": "https://tts.markn2000.com/api/v1/tts"
+}
+```
+
+- 公開 TTS API URL は `public_base_url`、`api_revision` から組み立てる。
+- 設定画面では公開 TTS API URL を表示し、同一オリジンの音声生成 Web UI と話者一覧 API をリンクとして開けるようにする。
 
 #### 音声生成 Web UI
 
@@ -207,7 +226,7 @@ DELETE /api/user-dict/words/{word_uuid}
 
 #### Linux 自己更新
 
-辞書管理画面では、Linux x86_64 で動作している場合に限り、GitHub の最新リリースを確認して実行ファイルを更新できる。
+設定画面では、Linux x86_64 で動作している場合に限り、GitHub の最新リリースを確認して実行ファイルを更新できる。
 
 ```http
 GET /api/update
@@ -346,7 +365,7 @@ config.toml
 - `POST /api/*/tts` へのレート制限は Cloudflare 側で行う。
 - 音声取得用の `GET /audio/{audio_id}.ogg` は生成 API のレート制限対象に含めない。
 - URL の `api_revision` はアクセス制限の代替として扱わない。
-- 音声生成 Web UI、Web UI 用の音声生成 API、辞書管理画面、辞書 API は `admin_listen` だけで提供し、Cloudflare Tunnel の接続先に含めない。
+- 音声生成 Web UI、Web UI 用の音声生成 API、設定画面、管理 API は `admin_listen` だけで提供し、Cloudflare Tunnel の接続先に含めない。
 - LAN 内の利用者は音声を生成し、辞書を変更し、Linux ではサーバーを最新版へ更新して再起動できるため、信頼できるネットワークでだけ使用する。
 
 ## 10. 初版の対象外

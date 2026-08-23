@@ -147,7 +147,7 @@ async fn main() -> Result<()> {
 
     println!("TTS サーバーを http://{listen}{api_path} で開始しました");
     println!("音声生成 Web UI を http://{admin_address}/webui で開始しました");
-    println!("辞書管理画面を http://{admin_address}/dictionary で開始しました");
+    println!("設定画面を http://{admin_address}/settings で開始しました");
 
     tokio::spawn(async move {
         shutdown_signal().await;

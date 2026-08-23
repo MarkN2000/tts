@@ -4,8 +4,9 @@ const path = require("node:path");
 const test = require("node:test");
 const vm = require("node:vm");
 
-const source = fs.readFileSync(path.join(__dirname, "../web/dictionary.js"), "utf8")
-  .split("\nconst elements = {")[0];
+const script = fs.readFileSync(path.join(__dirname, "../web/dictionary.js"), "utf8");
+const html = fs.readFileSync(path.join(__dirname, "../web/dictionary.html"), "utf8");
+const source = script.split("\nconst elements = {")[0];
 const context = vm.createContext({});
 vm.runInContext(
   `${source}\nthis.toKatakana = hiraganaToKatakana; this.splitMoras = splitPronunciationMoras; this.pitchLevels = accentPitchLevels; this.toSlider = accentTypeToSliderValue; this.toAccent = sliderValueToAccentType; this.valueText = accentValueText;`,
@@ -48,4 +49,12 @@ test("スライダー右端だけを平板へ変換する", () => {
 test("アクセントのスライダー値を意味のある文言で表す", () => {
   assert.equal(context.valueText(0), "平板");
   assert.equal(context.valueText(3), "アクセント 3");
+});
+
+test("設定画面が公開API URLを取得して表示する", () => {
+  assert.match(html, /id="public-tts-url"/u);
+  assert.match(html, /href="\/webui"/u);
+  assert.match(html, /href="\/speakers"/u);
+  assert.match(script, /fetch\("\/api\/settings"/u);
+  assert.match(script, /settings\.public_tts_url/u);
 });

@@ -24,9 +24,10 @@ const SCRIPT: &str = include_str!("../web/dictionary.js");
 
 pub fn router(state: Arc<AppState>) -> Router {
     Router::new()
-        .route("/dictionary", get(page))
-        .route("/dictionary.css", get(styles))
-        .route("/dictionary.js", get(script))
+        .route("/settings", get(page))
+        .route("/settings.css", get(styles))
+        .route("/settings.js", get(script))
+        .route("/api/settings", get(settings_info))
         .route("/api/user-dict", get(load_dictionary))
         .route("/api/version", get(version_info))
         .route("/api/update", get(check_update).post(apply_update))
@@ -37,6 +38,25 @@ pub fn router(state: Arc<AppState>) -> Router {
             axum::routing::put(update_word).delete(delete_word),
         )
         .with_state(state)
+}
+
+#[derive(Serialize)]
+struct SettingsInfo {
+    public_tts_url: String,
+}
+
+async fn settings_info(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+    Json(build_settings_info(
+        &state.config.public_base_url,
+        &state.config.api_revision,
+    ))
+}
+
+fn build_settings_info(public_base_url: &str, api_revision: &str) -> SettingsInfo {
+    let public_base_url = public_base_url.trim_end_matches('/');
+    SettingsInfo {
+        public_tts_url: format!("{public_base_url}/api/{api_revision}/tts"),
+    }
 }
 
 async fn version_info(State(state): State<Arc<AppState>>) -> impl IntoResponse {
@@ -321,5 +341,20 @@ impl IntoResponse for UpdateApiError {
             }),
         )
             .into_response()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::build_settings_info;
+
+    #[test]
+    fn 設定画面のリンクを実行中の設定から組み立てる() {
+        let settings = build_settings_info("https://tts.example.com/", "v2-test");
+
+        assert_eq!(
+            settings.public_tts_url,
+            "https://tts.example.com/api/v2-test/tts"
+        );
     }
 }

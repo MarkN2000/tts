@@ -78,12 +78,13 @@ const elements = {
   cancel: document.querySelector("#cancel-button"),
   preview: document.querySelector("#preview-button"),
   save: document.querySelector("#save-button"),
-  updatePanel: document.querySelector("#update-panel"),
   currentVersion: document.querySelector("#current-version"),
   checkUpdate: document.querySelector("#check-update-button"),
   applyUpdate: document.querySelector("#apply-update-button"),
   updateStatus: document.querySelector("#update-status"),
   updateError: document.querySelector("#update-error"),
+  publicTtsUrl: document.querySelector("#public-tts-url"),
+  linksError: document.querySelector("#links-error"),
 };
 
 let words = [];
@@ -117,6 +118,7 @@ for (const field of elements.form.elements) {
 
 loadDictionary();
 loadVersionInfo();
+loadSettingsInfo();
 
 function setMessage(message = "", isError = false) {
   elements.status.textContent = isError ? "" : message;
@@ -146,13 +148,33 @@ function updateDisabledState() {
 async function loadVersionInfo() {
   try {
     const response = await fetch("/api/version", { cache: "no-store" });
-    if (!response.ok) return;
+    if (!response.ok) throw new Error("バージョン情報を取得できませんでした。");
     const version = await response.json();
-    if (!version.supported) return;
-    elements.updatePanel.hidden = false;
     elements.currentVersion.textContent = `現在 v${version.current_version}`;
-  } catch {
-    // 辞書操作は継続できるため、更新欄だけを表示しない。
+    if (!version.supported) {
+      setUpdateMessage("自動アップデートはLinux x86_64版で利用できます。");
+      return;
+    }
+    elements.checkUpdate.hidden = false;
+    setUpdateMessage();
+  } catch (error) {
+    setUpdateMessage(error.message || "バージョン情報を取得できませんでした。", true);
+  }
+}
+
+async function loadSettingsInfo() {
+  try {
+    const response = await fetch("/api/settings", { cache: "no-store" });
+    if (!response.ok) throw new Error("公開API URLを取得できませんでした。");
+    const settings = await response.json();
+    if (typeof settings.public_tts_url !== "string" || settings.public_tts_url === "") {
+      throw new Error("設定情報の応答が不正です。");
+    }
+    elements.publicTtsUrl.textContent = settings.public_tts_url;
+    elements.linksError.textContent = "";
+  } catch (error) {
+    elements.publicTtsUrl.textContent = "取得できませんでした";
+    elements.linksError.textContent = error.message || "公開API URLを取得できませんでした。";
   }
 }
 
