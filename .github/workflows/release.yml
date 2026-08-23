@@ -19,6 +19,7 @@ jobs:
         run: |
           cargo test --locked
           node --test tests/dictionary-ui.test.cjs
+          node --check web/dictionary.js
           node --check web/webui.js
 
       - name: Build
@@ -48,6 +49,7 @@ jobs:
         run: |
           cargo test --locked
           node --test tests/dictionary-ui.test.cjs
+          node --check web/dictionary.js
           node --check web/webui.js
 
       - name: Install musl target
@@ -65,12 +67,15 @@ jobs:
           cp target/x86_64-unknown-linux-musl/release/tts-server dist/tts-server
           cp config.toml dist/config.toml
           tar -czf "tts-server-linux-x86_64.tar.gz" -C dist tts-server config.toml
+          cp target/x86_64-unknown-linux-musl/release/tts-server tts-server-linux-x86_64
 
       - name: Upload artifact
         uses: actions/upload-artifact@v7
         with:
           name: release-linux
-          path: tts-server-linux-x86_64.tar.gz
+          path: |
+            tts-server-linux-x86_64.tar.gz
+            tts-server-linux-x86_64
 
   release:
     name: Create GitHub Release

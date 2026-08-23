@@ -14,6 +14,7 @@ use uuid::Uuid;
 use crate::{
     dictionary::{is_valid_pronunciation, UserDictWordInput},
     engine::UserDictPreviewError,
+    updater::ApplyError,
     AppState,
 };
 
@@ -27,6 +28,8 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/dictionary.css", get(styles))
         .route("/dictionary.js", get(script))
         .route("/api/user-dict", get(load_dictionary))
+        .route("/api/version", get(version_info))
+        .route("/api/update", get(check_update).post(apply_update))
         .route("/api/user-dict/preview", post(preview_word))
         .route("/api/user-dict/words", post(add_word))
         .route(
@@ -34,6 +37,33 @@ pub fn router(state: Arc<AppState>) -> Router {
             axum::routing::put(update_word).delete(delete_word),
         )
         .with_state(state)
+}
+
+async fn version_info(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+    Json(state.updater.version_info())
+}
+
+async fn check_update(
+    State(state): State<Arc<AppState>>,
+) -> Result<impl IntoResponse, UpdateApiError> {
+    state
+        .updater
+        .check()
+        .await
+        .map(Json)
+        .map_err(UpdateApiError::failed)
+}
+
+async fn apply_update(
+    State(state): State<Arc<AppState>>,
+) -> Result<impl IntoResponse, UpdateApiError> {
+    let updated = state.updater.apply().await.map_err(|error| match error {
+        ApplyError::NoUpdate => UpdateApiError::conflict("利用できるアップデートはありません"),
+        ApplyError::Restarting => UpdateApiError::conflict("更新を適用して再起動中です"),
+        ApplyError::Failed(error) => UpdateApiError::failed(error),
+    })?;
+    let _ = state.shutdown_sender.send(true);
+    Ok((StatusCode::ACCEPTED, Json(updated)))
 }
 
 async fn page() -> impl IntoResponse {
@@ -248,6 +278,45 @@ impl IntoResponse for AdminError {
         (
             self.status,
             Json(ErrorResponse {
+                error: self.message,
+            }),
+        )
+            .into_response()
+    }
+}
+
+struct UpdateApiError {
+    status: StatusCode,
+    message: String,
+}
+
+impl UpdateApiError {
+    fn conflict(message: &'static str) -> Self {
+        Self {
+            status: StatusCode::CONFLICT,
+            message: message.to_owned(),
+        }
+    }
+
+    fn failed(source: Error) -> Self {
+        eprintln!("アップデートエラー: {source:#}");
+        Self {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            message: format!("アップデート処理に失敗しました: {source:#}"),
+        }
+    }
+}
+
+#[derive(Serialize)]
+struct UpdateErrorResponse {
+    error: String,
+}
+
+impl IntoResponse for UpdateApiError {
+    fn into_response(self) -> axum::response::Response {
+        (
+            self.status,
+            Json(UpdateErrorResponse {
                 error: self.message,
             }),
         )

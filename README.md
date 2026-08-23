@@ -72,6 +72,22 @@ URLのIPアドレスとポートは `admin_listen` に合わせてください�
 
 管理画面には認証がなく、LAN内の利用者は辞書を変更できます。`admin_listen` は信頼できるLANでだけ使用し、OSのファイアウォールでは必要なLANサブネットからの接続だけを許可してください。
 
+## Linuxでのアップデート
+
+Linux x86_64 では、辞書管理画面の「アップデートを確認」から最新リリースへ更新できます。更新すると実行ファイルだけを差し替えてサーバーが正常終了し、systemdによって再起動されます。`config.toml`と音声キャッシュは変更しません。
+
+systemdのサービスには次の設定が必要です。
+
+```ini
+[Service]
+Restart=always
+RestartSec=2s
+```
+
+サービスを実行するユーザーには、`tts-server`を置いたディレクトリへの書き込み権限を与えてください。更新前の実行ファイルは同じディレクトリの`tts-server.previous`へ1世代だけ保存されます。新しい実行ファイルが起動できない場合は、サービスを停止し、このファイルを`tts-server`へ戻してから起動してください。
+
+アップデート操作にも認証はありません。信頼できるLAN内の利用者だけが管理画面へ接続できるようにしてください。
+
 ## Cloudflare Tunnel
 
 Cloudflare Tunnel は `tts.markn2000.com` を公開用の `http://127.0.0.1:8080` だけへ転送します。管理用の8081番ポートはTunnelへ設定しないでください。生成 API のレート制限は Cloudflare 側で `POST /api/*/tts` を対象に設定し、`GET /audio/*` は対象外とします。
@@ -93,12 +109,12 @@ cargo clippy --all-targets -- -D warnings
 `v` で始まるタグをGitHubへpushすると、GitHub Actionsが次の配布物を自動作成し、GitHub Releaseへ添付します。
 
 - Windows x86_64: ZIP
-- Linux x86_64: musl静的リンクのtar.gz
+- Linux x86_64: musl静的リンクのtar.gzと、自己更新用raw実行ファイル
 
-どちらにも実行ファイルと `config.toml` が含まれます。
+WindowsのZIPとLinuxのtar.gzには、実行ファイルと`config.toml`が含まれます。自己更新用raw実行ファイルの名前は`tts-server-linux-x86_64`で、バージョン番号は付けません。
 
 ```console
-git tag v0.2.0
+git tag v0.3.0
 git push origin main
-git push origin v0.2.0
+git push origin v0.3.0
 ```

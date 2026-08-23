@@ -23,6 +23,20 @@
       AivisSpeech固有の複合語・品詞は、この画面の編集対象に含まれません。
     </p>
 
+    <section id="update-panel" class="update-panel" aria-labelledby="update-title" hidden>
+      <div class="list-heading">
+        <h2 id="update-title">サーバー更新</h2>
+        <span id="current-version" class="word-count"></span>
+      </div>
+      <p class="field-note">GitHubの最新リリースを確認し、実行ファイルを更新して再起動します。</p>
+      <div class="admin-actions update-actions">
+        <button id="check-update-button" class="secondary-button" type="button">アップデートを確認</button>
+        <button id="apply-update-button" type="button" hidden>更新して再起動</button>
+      </div>
+      <p id="update-status" class="status" role="status" aria-live="polite"></p>
+      <p id="update-error" class="status error" role="alert"></p>
+    </section>
+
     <form id="word-form" class="word-form" novalidate hidden>
       <h2 id="editor-title">単語を追加</h2>
       <input id="word-uuid" type="hidden">

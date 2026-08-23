@@ -78,10 +78,18 @@ const elements = {
   cancel: document.querySelector("#cancel-button"),
   preview: document.querySelector("#preview-button"),
   save: document.querySelector("#save-button"),
+  updatePanel: document.querySelector("#update-panel"),
+  currentVersion: document.querySelector("#current-version"),
+  checkUpdate: document.querySelector("#check-update-button"),
+  applyUpdate: document.querySelector("#apply-update-button"),
+  updateStatus: document.querySelector("#update-status"),
+  updateError: document.querySelector("#update-error"),
 };
 
 let words = [];
 let busy = false;
+let updateBusy = false;
+let availableVersion;
 let previewAudio;
 let previewAudioUrl;
 let previewAbortController;
@@ -99,6 +107,8 @@ elements.pronunciation.addEventListener("input", (event) => {
 });
 elements.accentSlider.addEventListener("input", updateAccentFromSlider);
 elements.priority.addEventListener("input", updatePriorityLabel);
+elements.checkUpdate.addEventListener("click", checkForUpdate);
+elements.applyUpdate.addEventListener("click", applyUpdate);
 
 for (const field of elements.form.elements) {
   field.addEventListener("invalid", () => field.setAttribute("aria-invalid", "true"));
@@ -106,6 +116,7 @@ for (const field of elements.form.elements) {
 }
 
 loadDictionary();
+loadVersionInfo();
 
 function setMessage(message = "", isError = false) {
   elements.status.textContent = isError ? "" : message;
@@ -114,10 +125,149 @@ function setMessage(message = "", isError = false) {
 
 function setBusy(value) {
   busy = value;
-  elements.reload.disabled = busy;
-  elements.add.disabled = busy;
-  for (const button of elements.list.querySelectorAll("button")) button.disabled = busy;
-  for (const field of elements.form.elements) field.disabled = busy;
+  updateDisabledState();
+}
+
+function setUpdateBusy(value) {
+  updateBusy = value;
+  updateDisabledState();
+}
+
+function updateDisabledState() {
+  const disabled = busy || updateBusy;
+  elements.reload.disabled = disabled;
+  elements.add.disabled = disabled;
+  elements.checkUpdate.disabled = disabled;
+  elements.applyUpdate.disabled = disabled;
+  for (const button of elements.list.querySelectorAll("button")) button.disabled = disabled;
+  for (const field of elements.form.elements) field.disabled = disabled;
+}
+
+async function loadVersionInfo() {
+  try {
+    const response = await fetch("/api/version", { cache: "no-store" });
+    if (!response.ok) return;
+    const version = await response.json();
+    if (!version.supported) return;
+    elements.updatePanel.hidden = false;
+    elements.currentVersion.textContent = `現在 v${version.current_version}`;
+  } catch {
+    // 辞書操作は継続できるため、更新欄だけを表示しない。
+  }
+}
+
+function setUpdateMessage(message = "", isError = false) {
+  elements.updateStatus.textContent = isError ? "" : message;
+  elements.updateError.textContent = isError ? message : "";
+}
+
+async function checkForUpdate() {
+  if (busy || updateBusy) return;
+  setUpdateBusy(true);
+  availableVersion = undefined;
+  elements.applyUpdate.hidden = true;
+  elements.checkUpdate.textContent = "確認中…";
+  setUpdateMessage("最新リリースを確認しています…");
+  try {
+    const response = await fetch("/api/update", { cache: "no-store" });
+    if (!response.ok) throw new Error(await readError(response));
+    const update = await response.json();
+    elements.currentVersion.textContent = `現在 v${update.current_version}`;
+    if (!update.update_available) {
+      setUpdateMessage(`v${update.current_version}は最新版です。`);
+      return;
+    }
+    availableVersion = update.latest_version;
+    elements.applyUpdate.hidden = false;
+    setUpdateMessage(`v${availableVersion}を利用できます。`);
+  } catch (error) {
+    setUpdateMessage(error.message || "アップデートを確認できませんでした。", true);
+  } finally {
+    elements.checkUpdate.textContent = "アップデートを確認";
+    setUpdateBusy(false);
+  }
+}
+
+async function applyUpdate() {
+  if (busy || updateBusy || !availableVersion) return;
+  if (!confirm(`v${availableVersion}へ更新してサーバーを再起動しますか？`)) return;
+  let targetVersion = availableVersion;
+  setUpdateBusy(true);
+  setBusy(true);
+  elements.applyUpdate.textContent = "更新中…";
+  setUpdateMessage("更新ファイルを取得して検証しています。画面を閉じないでください。");
+
+  let response;
+  try {
+    response = await fetch("/api/update", { method: "POST" });
+  } catch {
+    // 応答送信直後に再起動すると通信が切れることがあるため、対象版の起動も確認する。
+    if (await waitForVersion(targetVersion, 20_000)) {
+      showUpdateCompleted(targetVersion);
+      return;
+    }
+    setUpdateMessage("アップデートを実行できませんでした。", true);
+    finishUpdateAttempt();
+    return;
+  }
+
+  if (!response.ok) {
+    setUpdateMessage(await readError(response), true);
+    finishUpdateAttempt();
+    return;
+  }
+  try {
+    const result = await response.json();
+    if (typeof result.version !== "string" || result.version === "") {
+      throw new Error("更新後のバージョンを確認できませんでした。");
+    }
+    targetVersion = result.version;
+  } catch (error) {
+    setUpdateMessage(error.message || "更新後のバージョンを確認できませんでした。", true);
+    finishUpdateAttempt();
+    return;
+  }
+  setUpdateMessage("サーバーを再起動しています…");
+  if (await waitForVersion(targetVersion, 90_000)) {
+    showUpdateCompleted(targetVersion);
+    return;
+  }
+  setUpdateMessage("再起動後のサーバーへ接続できません。systemdの状態を確認してください。", true);
+  finishUpdateAttempt();
+}
+
+async function waitForVersion(targetVersion, timeoutMilliseconds) {
+  const deadline = Date.now() + timeoutMilliseconds;
+  while (Date.now() < deadline) {
+    await delay(2_000);
+    try {
+      const response = await fetch("/api/version", { cache: "no-store" });
+      if (!response.ok) continue;
+      const version = await response.json();
+      if (version.current_version === targetVersion) return true;
+    } catch {
+      // 再起動中の接続失敗は想定内。
+    }
+  }
+  return false;
+}
+
+function showUpdateCompleted(version) {
+  elements.currentVersion.textContent = `現在 v${version}`;
+  elements.applyUpdate.hidden = true;
+  availableVersion = undefined;
+  setUpdateMessage(`v${version}へ更新しました。`);
+  finishUpdateAttempt();
+}
+
+function finishUpdateAttempt() {
+  elements.applyUpdate.textContent = "更新して再起動";
+  setUpdateBusy(false);
+  setBusy(false);
+}
+
+function delay(milliseconds) {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
 async function loadDictionary(successMessage = "") {

@@ -4,6 +4,7 @@ mod config;
 mod converter;
 mod dictionary;
 mod engine;
+mod updater;
 mod webui;
 
 use std::{collections::HashMap, env, fmt, sync::Arc, time::Duration};
@@ -34,6 +35,7 @@ use crate::{
     config::Config,
     converter::FfmpegConverter,
     engine::{EngineClient, SpeakerMeta},
+    updater::UpdateManager,
 };
 
 const MAX_GENERATION_REQUESTS: usize = 10;
@@ -48,6 +50,8 @@ pub(crate) struct AppState {
     converter: FfmpegConverter,
     pub(crate) generation_lock: Semaphore,
     generation_slots: Semaphore,
+    pub(crate) updater: UpdateManager,
+    pub(crate) shutdown_sender: watch::Sender<bool>,
 }
 
 #[derive(Deserialize)]
@@ -69,6 +73,11 @@ pub(crate) struct GeneratedAudio {
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    if env::args().nth(1).as_deref() == Some("--version") {
+        println!("tts-server {}", env!("CARGO_PKG_VERSION"));
+        return Ok(());
+    }
+
     let executable = env::current_exe().context("実行ファイルの場所を取得できません")?;
     let executable_directory = executable
         .parent()
@@ -106,6 +115,7 @@ async fn main() -> Result<()> {
     let api_path = format!("/api/{}/tts", config.api_revision);
     let listen = config.listen.clone();
     let admin_address = config.admin_address()?;
+    let (shutdown_sender, shutdown_receiver) = watch::channel(false);
     let state = Arc::new(AppState {
         config,
         engine,
@@ -115,6 +125,8 @@ async fn main() -> Result<()> {
         converter,
         generation_lock: Semaphore::new(1),
         generation_slots: Semaphore::new(MAX_GENERATION_REQUESTS),
+        updater: UpdateManager::new(executable)?,
+        shutdown_sender: shutdown_sender.clone(),
     });
 
     spawn_cache_cleanup(Arc::clone(&state));
@@ -137,7 +149,6 @@ async fn main() -> Result<()> {
     println!("音声生成 Web UI を http://{admin_address}/webui で開始しました");
     println!("辞書管理画面を http://{admin_address}/dictionary で開始しました");
 
-    let (shutdown_sender, shutdown_receiver) = watch::channel(false);
     tokio::spawn(async move {
         shutdown_signal().await;
         let _ = shutdown_sender.send(true);
@@ -274,9 +285,32 @@ fn spawn_cache_cleanup(state: Arc<AppState>) {
     });
 }
 
+#[cfg(not(unix))]
 async fn shutdown_signal() {
     if let Err(error) = tokio::signal::ctrl_c().await {
         eprintln!("終了シグナルを待機できません: {error}");
+    }
+}
+
+#[cfg(unix)]
+async fn shutdown_signal() {
+    use tokio::signal::unix::{signal, SignalKind};
+
+    let mut terminate = match signal(SignalKind::terminate()) {
+        Ok(signal) => signal,
+        Err(error) => {
+            eprintln!("SIGTERMを待機できません: {error}");
+            let _ = tokio::signal::ctrl_c().await;
+            return;
+        }
+    };
+    tokio::select! {
+        result = tokio::signal::ctrl_c() => {
+            if let Err(error) = result {
+                eprintln!("終了シグナルを待機できません: {error}");
+            }
+        }
+        _ = terminate.recv() => {}
     }
 }
 

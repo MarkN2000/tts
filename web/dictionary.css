@@ -125,6 +125,14 @@ h2 {
   color: #7a5b16;
 }
 
+.update-panel {
+  margin-top: 24px;
+  padding-top: 24px;
+  border-top: 1px solid #dededb;
+}
+
+.update-actions { margin-top: 14px; }
+
 .word-form {
   display: grid;
   gap: 10px;
