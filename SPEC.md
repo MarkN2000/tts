@@ -54,6 +54,16 @@ GET /audio/{audio_id}.ogg
 - `Content-Type: audio/ogg` で保存済み音声を返す。
 - 音声生成用の GET API は提供しない。
 
+### 話者一覧
+
+```http
+GET /speakers
+```
+
+- 起動時に TTS Engine の `/speakers` から取得した JSON を加工せずに返す。
+- `Content-Type: application/json` とする。
+- 起動中は同じ内容を返し、更新には仲介サーバーの再起動を必要とする。
+
 ## 3. 音声生成
 
 - 接続する TTS Engine は設定ファイルで1つだけ指定し、リクエストでは切り替えない。
@@ -66,6 +76,7 @@ GET /audio/{audio_id}.ogg
 ## 4. 話者
 
 - 起動時に TTS Engine の `/speakers` から利用可能な話者 ID、スタイル、`speaker_uuid` を取得する。
+- `/speakers` の取得結果は生の JSON としてもメモリに保持し、公開用の話者一覧に使用する。
 - 各 `speaker_uuid` について `/speaker_info` を取得し、`policy` の先頭にある空でない Markdown 見出しから先頭の `#` を除いたライセンス名を自動取得する。
 - ライセンス名を取得できない場合は `Unknown` とする。
 - 未登録 ID はエラーにせず、`default_id` に置き換える。

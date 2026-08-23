@@ -7,7 +7,7 @@ use std::{collections::HashMap, env, sync::Arc, time::Duration};
 
 use anyhow::{Context, Result};
 use axum::{
-    body::Body,
+    body::{Body, Bytes},
     extract::{DefaultBodyLimit, Path, State},
     http::{header::CONTENT_TYPE, Response, StatusCode},
     response::IntoResponse,
@@ -29,6 +29,7 @@ struct AppState {
     config: Config,
     engine: EngineClient,
     speakers: HashMap<String, SpeakerMeta>,
+    speakers_json: Bytes,
     cache: AudioCache,
     converter: FfmpegConverter,
     generation_lock: Semaphore,
@@ -61,8 +62,8 @@ async fn main() -> Result<()> {
     converter.verify().await?;
 
     let engine = EngineClient::new(config.engine_url.clone());
-    let speakers = engine.load_speakers().await?;
-    if !speakers.contains_key(&config.default_id) {
+    let speaker_catalog = engine.load_speakers().await?;
+    if !speaker_catalog.speakers.contains_key(&config.default_id) {
         anyhow::bail!(
             "default_id {} は Engine の話者一覧に存在しません",
             config.default_id
@@ -87,7 +88,8 @@ async fn main() -> Result<()> {
     let state = Arc::new(AppState {
         config,
         engine,
-        speakers,
+        speakers: speaker_catalog.speakers,
+        speakers_json: Bytes::from(speaker_catalog.raw_json),
         cache,
         converter,
         generation_lock: Semaphore::new(1),
@@ -97,6 +99,7 @@ async fn main() -> Result<()> {
 
     let app = Router::new()
         .route(&api_path, post(generate_audio))
+        .route("/speakers", get(get_speakers))
         .route("/audio/{filename}", get(get_audio))
         .layer(DefaultBodyLimit::disable())
         .with_state(state);
@@ -146,6 +149,13 @@ async fn generate_audio(
         license: speaker.license.clone(),
         url: format!("{}/audio/{}.ogg", state.config.public_base_url, audio_id),
     }))
+}
+
+async fn get_speakers(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+    (
+        [(CONTENT_TYPE, "application/json")],
+        state.speakers_json.clone(),
+    )
 }
 
 async fn get_audio(

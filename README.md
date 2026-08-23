@@ -44,6 +44,12 @@ curl -X POST http://127.0.0.1:8080/api/v1-k7m4q2/tts \
 
 返されたURLへGETすると、`audio/ogg` の音声を取得できます。
 
+話者ID・名前・スタイルは、起動時にEngineから取得した内容を返す次のAPIで確認できます。
+
+```console
+curl http://127.0.0.1:8080/speakers
+```
+
 ## Cloudflare Tunnel
 
 Cloudflare Tunnel は `tts.markn2000.com` を `http://127.0.0.1:8080` へ転送するよう設定します。生成 API のレート制限は Cloudflare 側で `POST /api/*/tts` を対象に設定し、`GET /audio/*` は対象外とします。

@@ -15,6 +15,11 @@ pub struct SpeakerMeta {
     pub license: String,
 }
 
+pub struct SpeakerCatalog {
+    pub speakers: HashMap<String, SpeakerMeta>,
+    pub raw_json: Vec<u8>,
+}
+
 #[derive(Debug, Deserialize)]
 struct Speaker {
     speaker_uuid: String,
@@ -39,8 +44,8 @@ impl EngineClient {
         }
     }
 
-    pub async fn load_speakers(&self) -> Result<HashMap<String, SpeakerMeta>> {
-        let speakers: Vec<Speaker> = self
+    pub async fn load_speakers(&self) -> Result<SpeakerCatalog> {
+        let raw_json = self
             .client
             .get(format!("{}/speakers", self.base_url))
             .send()
@@ -48,9 +53,12 @@ impl EngineClient {
             .context("Engine の /speakers に接続できません")?
             .error_for_status()
             .context("Engine の /speakers がエラーを返しました")?
-            .json()
+            .bytes()
             .await
-            .context("Engine の話者一覧を解析できません")?;
+            .context("Engine の話者一覧を読み込めません")?
+            .to_vec();
+        let speakers: Vec<Speaker> =
+            serde_json::from_slice(&raw_json).context("Engine の話者一覧を解析できません")?;
 
         let mut licenses: HashMap<String, String> = HashMap::new();
         let mut result = HashMap::new();
@@ -78,7 +86,10 @@ impl EngineClient {
             bail!("Engine から利用可能な話者IDを取得できませんでした");
         }
 
-        Ok(result)
+        Ok(SpeakerCatalog {
+            speakers: result,
+            raw_json,
+        })
     }
 
     async fn load_license(&self, speaker_uuid: &str) -> Result<String> {
