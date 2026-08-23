@@ -307,7 +307,9 @@ fn apply_user_dict_preview_accent(
         .map(|mora| mora.get("text")?.as_str())
         .collect::<Option<String>>()
         .ok_or(UserDictPreviewError::InvalidInput)?;
-    if generated_pronunciation != pronunciation {
+    if normalize_pronunciation_for_comparison(&generated_pronunciation)
+        != normalize_pronunciation_for_comparison(pronunciation)
+    {
         return Err(UserDictPreviewError::InvalidInput);
     }
     let accent = if accent_type == 0 {
@@ -324,6 +326,20 @@ fn apply_user_dict_preview_accent(
     merged_phrase["accent"] = Value::from(accent);
     audio_query["accent_phrases"] = Value::Array(vec![merged_phrase]);
     Ok(())
+}
+
+fn normalize_pronunciation_for_comparison(pronunciation: &str) -> String {
+    pronunciation
+        .chars()
+        .map(|character| match character {
+            'ヂ' => 'ジ',
+            'ヅ' => 'ズ',
+            'ヰ' => 'イ',
+            'ヱ' => 'エ',
+            'ヲ' => 'オ',
+            _ => character,
+        })
+        .collect()
 }
 
 fn validate_refreshed_preview_pitch(expected: &Value, refreshed: &Value) -> Result<()> {
@@ -441,6 +457,38 @@ mod tests {
 
         assert!(matches!(
             apply_user_dict_preview_accent(&mut query, "リンゴ", 1),
+            Err(UserDictPreviewError::InvalidInput)
+        ));
+    }
+
+    #[test]
+    fn 辞書試聴はengineによる読みの正規化を許容する() {
+        let mut query = json!({
+            "accent_phrases": [{
+                "moras": [
+                    { "text": "カイズカ" },
+                    { "text": "オオカ" },
+                    { "text": "イイエエ" }
+                ],
+                "accent": 1
+            }]
+        });
+
+        apply_user_dict_preview_accent(&mut query, "カイヅカオヲカイヰエヱ", 1).unwrap();
+    }
+
+    #[test]
+    fn 辞書試聴は句読点を含むアクセント句を拒否する() {
+        let mut query = json!({
+            "accent_phrases": [{
+                "moras": [{ "text": "タンゴ" }],
+                "accent": 1,
+                "pause_mora": { "text": "、" }
+            }]
+        });
+
+        assert!(matches!(
+            apply_user_dict_preview_accent(&mut query, "タンゴ", 1),
             Err(UserDictPreviewError::InvalidInput)
         ));
     }
