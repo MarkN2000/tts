@@ -100,6 +100,11 @@ impl AudioCache {
         self.cleanup_files(Some(audio_id)).await
     }
 
+    pub async fn clear(&self) -> Result<()> {
+        self.ensure_ready().await?;
+        self.clear_audio_files().await
+    }
+
     async fn cleanup_files(&self, preserved_audio_id: Option<&str>) -> Result<()> {
         let mut entries = fs::read_dir(&self.directory)
             .await

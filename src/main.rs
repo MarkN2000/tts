@@ -1,6 +1,8 @@
+mod admin;
 mod cache;
 mod config;
 mod converter;
+mod dictionary;
 mod engine;
 
 use std::{collections::HashMap, env, sync::Arc, time::Duration};
@@ -16,7 +18,12 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use tokio::{fs, net::TcpListener, sync::Semaphore, time};
+use tokio::{
+    fs,
+    net::TcpListener,
+    sync::{watch, Semaphore},
+    time,
+};
 
 use crate::{
     cache::{AudioCache, CacheSignature},
@@ -25,14 +32,14 @@ use crate::{
     engine::{EngineClient, SpeakerMeta},
 };
 
-struct AppState {
-    config: Config,
-    engine: EngineClient,
+pub(crate) struct AppState {
+    pub(crate) config: Config,
+    pub(crate) engine: EngineClient,
     speakers: HashMap<String, SpeakerMeta>,
     speakers_json: Bytes,
-    cache: AudioCache,
+    pub(crate) cache: AudioCache,
     converter: FfmpegConverter,
-    generation_lock: Semaphore,
+    pub(crate) generation_lock: Semaphore,
 }
 
 #[derive(Deserialize)]
@@ -85,6 +92,7 @@ async fn main() -> Result<()> {
 
     let api_path = format!("/api/{}/tts", config.api_revision);
     let listen = config.listen.clone();
+    let admin_address = config.admin_address()?;
     let state = Arc::new(AppState {
         config,
         engine,
@@ -97,21 +105,37 @@ async fn main() -> Result<()> {
 
     spawn_cache_cleanup(Arc::clone(&state));
 
-    let app = Router::new()
+    let public_app = Router::new()
         .route(&api_path, post(generate_audio))
         .route("/speakers", get(get_speakers))
         .route("/audio/{filename}", get(get_audio))
         .layer(DefaultBodyLimit::disable())
-        .with_state(state);
-    let listener = TcpListener::bind(&listen)
+        .with_state(Arc::clone(&state));
+    let admin_app = admin::router(state);
+    let public_listener = TcpListener::bind(&listen)
         .await
         .with_context(|| format!("{listen} で待受を開始できません"))?;
+    let admin_listener = TcpListener::bind(admin_address)
+        .await
+        .with_context(|| format!("{admin_address} で管理画面の待受を開始できません"))?;
 
     println!("TTS サーバーを http://{listen}{api_path} で開始しました");
-    axum::serve(listener, app)
-        .with_graceful_shutdown(shutdown_signal())
-        .await
-        .context("HTTP サーバーが異常終了しました")
+    println!("辞書管理画面を http://{admin_address}/dictionary で開始しました");
+
+    let (shutdown_sender, shutdown_receiver) = watch::channel(false);
+    tokio::spawn(async move {
+        shutdown_signal().await;
+        let _ = shutdown_sender.send(true);
+    });
+
+    tokio::try_join!(
+        axum::serve(public_listener, public_app)
+            .with_graceful_shutdown(wait_for_shutdown(shutdown_receiver.clone())),
+        axum::serve(admin_listener, admin_app)
+            .with_graceful_shutdown(wait_for_shutdown(shutdown_receiver)),
+    )
+    .map(|_| ())
+    .context("HTTP サーバーが異常終了しました")
 }
 
 async fn generate_audio(
@@ -222,6 +246,17 @@ fn spawn_cache_cleanup(state: Arc<AppState>) {
 async fn shutdown_signal() {
     if let Err(error) = tokio::signal::ctrl_c().await {
         eprintln!("終了シグナルを待機できません: {error}");
+    }
+}
+
+async fn wait_for_shutdown(mut receiver: watch::Receiver<bool>) {
+    if *receiver.borrow() {
+        return;
+    }
+    while receiver.changed().await.is_ok() {
+        if *receiver.borrow() {
+            return;
+        }
     }
 }
 

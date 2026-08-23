@@ -23,7 +23,7 @@ tts-server.exe  # Linuxでは tts-server
 config.toml
 ```
 
-`config.toml` の `engine_url`、`public_base_url`、`default_id` などを環境に合わせて変更し、実行ファイルを起動してください。相対指定の `cache_dir` は、このディレクトリを基準にします。
+`config.toml` の `engine_url`、`public_base_url`、`default_id` などを環境に合わせて変更し、実行ファイルを起動してください。相対指定の `cache_dir` は、このディレクトリを基準にします。辞書管理用の `admin_listen` には、管理画面を開く端末から接続できる、このPCのプライベートIPアドレスを指定します。
 
 ## API
 
@@ -50,9 +50,21 @@ curl -X POST http://127.0.0.1:8080/api/v1-k7m4q2/tts \
 curl http://127.0.0.1:8080/speakers
 ```
 
+## ユーザー辞書
+
+起動後、LAN内のブラウザで次の管理画面を開くと、VOICEVOXとAivisSpeechに共通する単一語を追加・編集・削除できます。画面は実行ファイルへ埋め込まれているため、配布ファイルは増えません。
+
+```text
+http://192.168.1.10:8081/dictionary
+```
+
+URLのIPアドレスとポートは `admin_listen` に合わせてください。辞書を変更すると、変更前の辞書で生成された音声キャッシュはすべて削除されます。
+
+管理画面には認証がなく、LAN内の利用者は辞書を変更できます。`admin_listen` は信頼できるLANでだけ使用し、OSのファイアウォールでは必要なLANサブネットからの接続だけを許可してください。
+
 ## Cloudflare Tunnel
 
-Cloudflare Tunnel は `tts.markn2000.com` を `http://127.0.0.1:8080` へ転送するよう設定します。生成 API のレート制限は Cloudflare 側で `POST /api/*/tts` を対象に設定し、`GET /audio/*` は対象外とします。
+Cloudflare Tunnel は `tts.markn2000.com` を公開用の `http://127.0.0.1:8080` だけへ転送します。管理用の8081番ポートはTunnelへ設定しないでください。生成 API のレート制限は Cloudflare 側で `POST /api/*/tts` を対象に設定し、`GET /audio/*` は対象外とします。
 
 APIの破壊的変更時は、推測しにくい新しい値へ `api_revision` を変更してください。これは認証情報ではありません。
 

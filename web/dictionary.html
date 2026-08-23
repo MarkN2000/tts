@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ユーザー辞書</title>
+  <link rel="stylesheet" href="/dictionary.css">
+  <script src="/dictionary.js" defer></script>
+</head>
+<body>
+  <main class="shell">
+    <header class="page-header">
+      <div>
+        <p class="eyebrow">TTS SERVER</p>
+        <h1>ユーザー辞書</h1>
+        <p class="description">VOICEVOX / AivisSpeech 共通の単語を編集します。</p>
+      </div>
+      <button id="add-button" class="primary" type="button">単語を追加</button>
+    </header>
+
+    <p id="status" class="status" role="status" aria-live="polite">読み込み中です…</p>
+    <p id="excluded-note" class="notice" hidden>
+      この画面では扱えない複合語または品詞があります。対象外の単語は変更されません。
+    </p>
+
+    <section id="editor" class="editor" aria-labelledby="editor-title" hidden>
+      <div class="section-heading">
+        <h2 id="editor-title">単語を追加</h2>
+        <button id="cancel-button" class="text-button" type="button">閉じる</button>
+      </div>
+      <form id="word-form">
+        <input id="word-uuid" type="hidden">
+        <div class="form-grid">
+          <label>
+            <span>表記</span>
+            <input id="surface" name="surface" required autocomplete="off" placeholder="例: 音声合成">
+          </label>
+          <label>
+            <span>読み（全角カタカナ）</span>
+            <input id="pronunciation" name="pronunciation" required autocomplete="off" pattern="[ァ-ヴー]+" placeholder="例: オンセイゴウセイ">
+          </label>
+          <label>
+            <span>品詞</span>
+            <select id="word-type" name="word_type">
+              <option value="PROPER_NOUN">固有名詞</option>
+              <option value="COMMON_NOUN">普通名詞</option>
+              <option value="VERB">動詞</option>
+              <option value="ADJECTIVE">形容詞</option>
+              <option value="SUFFIX">接尾辞</option>
+            </select>
+          </label>
+          <label>
+            <span>アクセント位置</span>
+            <input id="accent-type" name="accent_type" type="number" min="0" step="1" value="0" required>
+          </label>
+          <label>
+            <span>優先度（0–10）</span>
+            <input id="priority" name="priority" type="number" min="0" max="10" step="1" value="5" required>
+          </label>
+        </div>
+        <div class="form-actions">
+          <button id="save-button" class="primary" type="submit">保存</button>
+        </div>
+      </form>
+    </section>
+
+    <section class="dictionary" aria-labelledby="list-title">
+      <div class="section-heading">
+        <h2 id="list-title">登録単語</h2>
+        <span id="word-count" class="count"></span>
+      </div>
+      <div id="word-list" class="word-list"></div>
+      <p id="empty-message" class="empty" hidden>共通形式の単語はまだ登録されていません。</p>
+    </section>
+  </main>
+</body>
+</html>

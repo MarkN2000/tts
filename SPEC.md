@@ -64,6 +64,89 @@ GET /speakers
 - `Content-Type: application/json` とする。
 - 起動中は同じ内容を返し、更新には仲介サーバーの再起動を必要とする。
 
+### LAN 内管理画面
+
+辞書編集用の画面と API は、公開 API と別の `admin_listen` で提供する。
+
+```http
+GET /dictionary
+```
+
+- 画面の HTML、CSS、JavaScript は実行ファイルへ埋め込み、追加ファイルとして配布しない。
+- `admin_listen` にはプライベート IPv4、ループバックアドレス、または IPv6 のユニークローカルアドレスだけを指定できる。
+- Cloudflare Tunnel は公開用の `listen` だけへ接続し、`admin_listen` は公開しない。
+- 公開用の `listen` では、管理画面と次の辞書 API を提供しない。
+- LAN 外からの直接接続は OS のファイアウォールでも拒否する。
+
+#### ユーザー辞書取得
+
+```http
+GET /api/user-dict
+```
+
+```json
+{
+  "words": [
+    {
+      "uuid": "00000000-0000-0000-0000-000000000000",
+      "surface": "単語",
+      "pronunciation": "タンゴ",
+      "accent_type": 1,
+      "word_type": "PROPER_NOUN",
+      "priority": 5
+    }
+  ],
+  "has_excluded_words": false
+}
+```
+
+#### ユーザー辞書追加
+
+```http
+POST /api/user-dict/words
+Content-Type: application/json
+```
+
+```json
+{
+  "surface": "単語",
+  "pronunciation": "タンゴ",
+  "accent_type": 1,
+  "word_type": "PROPER_NOUN",
+  "priority": 5
+}
+```
+
+成功時は `201 Created` と追加された単語の UUID を返す。
+
+```json
+{
+  "uuid": "00000000-0000-0000-0000-000000000000"
+}
+```
+
+#### ユーザー辞書更新・削除
+
+```http
+PUT /api/user-dict/words/{word_uuid}
+Content-Type: application/json
+```
+
+PUT の本文は追加時と同じ形式とし、成功時は `204 No Content` を返す。
+
+```http
+DELETE /api/user-dict/words/{word_uuid}
+```
+
+削除成功時は `204 No Content` を返す。
+
+- 編集対象は VOICEVOX と AivisSpeech に共通する単一語だけとする。
+- `word_type` は `PROPER_NOUN`、`COMMON_NOUN`、`VERB`、`ADJECTIVE`、`SUFFIX` の5種類とする。
+- AivisSpeech 固有の複合語および共通外の品詞は一覧と編集対象から除外し、`has_excluded_words` で存在を通知する。
+- 辞書は TTS Engine 側を正とし、仲介サーバーには複製しない。
+- 追加、更新、削除は音声生成と同じ排他制御内で行い、成功後に音声キャッシュを全削除する。
+- エラー応答は `{ "error": "メッセージ" }` とする。
+
 ## 3. 音声生成
 
 - 接続する TTS Engine は設定ファイルで1つだけ指定し、リクエストでは切り替えない。
@@ -116,11 +199,13 @@ GET /speakers
 - 比較対象が変更されていた場合は、既存キャッシュをすべて削除する。
 - 同じ接続先のまま Engine または音声モデルを変更した場合は、利用者が `cache_revision` を変更する。
 - `api_revision`、`cache_days`、`cache_max_mb`、公開 URL、`default_id` の変更だけではキャッシュを全削除しない。
+- `admin_listen` の変更ではキャッシュを削除しない。
 
 ## 7. 設定ファイル例
 
 ```toml
 listen = "127.0.0.1:8080"
+admin_listen = "192.168.1.10:8081"
 engine_url = "http://192.168.1.11:10101"
 public_base_url = "https://tts.markn2000.com"
 api_revision = "v1-k7m4q2"
@@ -157,6 +242,8 @@ config.toml
 - `POST /api/*/tts` へのレート制限は Cloudflare 側で行う。
 - 音声取得用の `GET /audio/{audio_id}.ogg` は生成 API のレート制限対象に含めない。
 - URL の `api_revision` はアクセス制限の代替として扱わない。
+- 辞書管理画面と辞書 API は `admin_listen` だけで提供し、Cloudflare Tunnel の接続先に含めない。
+- LAN 内の利用者は辞書を変更できるため、信頼できるネットワークでだけ使用する。
 
 ## 10. 初版の対象外
 
@@ -165,3 +252,5 @@ config.toml
 - 音声生成用 GET API
 - 起動中の設定ファイル再読み込み
 - FFmpeg の同梱
+- ユーザー辞書の試聴、検索、一括操作、インポート、エクスポート
+- AivisSpeech 固有の複合語および共通外の品詞の編集

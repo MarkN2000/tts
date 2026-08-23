@@ -12,4 +12,4 @@ serde_json = "1"
 sha2 = "0.10"
 tokio = { version = "1", features = ["fs", "io-util", "macros", "net", "process", "rt-multi-thread", "signal", "sync", "time"] }
 toml = "0.9"
-
+uuid = { version = "1", features = ["serde"] }

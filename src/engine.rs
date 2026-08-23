@@ -3,6 +3,10 @@ use std::collections::HashMap;
 use anyhow::{bail, Context, Result};
 use reqwest::{header::CONTENT_TYPE, Client};
 use serde::Deserialize;
+use serde_json::Value;
+use uuid::Uuid;
+
+use crate::dictionary::{parse_user_dictionary, UserDictWordInput, UserDictionary};
 
 #[derive(Clone)]
 pub struct EngineClient {
@@ -144,6 +148,62 @@ impl EngineClient {
             .context("Engine の WAV 応答を読み込めません")?;
 
         Ok(wav.to_vec())
+    }
+
+    pub async fn load_user_dictionary(&self) -> Result<UserDictionary> {
+        let response: Value = self
+            .client
+            .get(format!("{}/user_dict", self.base_url))
+            .query(&[("enable_compound_accent", true)])
+            .send()
+            .await
+            .context("Engine の user_dict に接続できません")?
+            .error_for_status()
+            .context("Engine の user_dict がエラーを返しました")?
+            .json()
+            .await
+            .context("Engine の user_dict 応答を解析できません")?;
+
+        parse_user_dictionary(response)
+    }
+
+    pub async fn add_user_dict_word(&self, word: &UserDictWordInput) -> Result<Uuid> {
+        let uuid: Uuid = self
+            .client
+            .post(format!("{}/user_dict_word", self.base_url))
+            .query(&word.engine_query())
+            .send()
+            .await
+            .context("Engine の単語追加APIに接続できません")?
+            .error_for_status()
+            .context("Engine が単語の追加を拒否しました")?
+            .json()
+            .await
+            .context("Engine の単語追加応答を解析できません")?;
+        Ok(uuid)
+    }
+
+    pub async fn update_user_dict_word(&self, uuid: Uuid, word: &UserDictWordInput) -> Result<()> {
+        self.client
+            .put(format!("{}/user_dict_word/{uuid}", self.base_url))
+            .query(&word.engine_query())
+            .send()
+            .await
+            .context("Engine の単語更新APIに接続できません")?
+            .error_for_status()
+            .context("Engine が単語の更新を拒否しました")?;
+        Ok(())
+    }
+
+    pub async fn delete_user_dict_word(&self, uuid: Uuid) -> Result<()> {
+        self.client
+            .delete(format!("{}/user_dict_word/{uuid}", self.base_url))
+            .send()
+            .await
+            .context("Engine の単語削除APIに接続できません")?
+            .error_for_status()
+            .context("Engine が単語の削除を拒否しました")?;
+        Ok(())
     }
 }
 

@@ -1,5 +1,6 @@
 use std::{
     fs,
+    net::{IpAddr, SocketAddr},
     path::{Path, PathBuf},
 };
 
@@ -9,6 +10,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Debug, Deserialize)]
 pub struct Config {
     pub listen: String,
+    pub admin_listen: String,
     pub engine_url: String,
     pub public_base_url: String,
     pub api_revision: String,
@@ -86,7 +88,46 @@ impl Config {
         reqwest::Url::parse(&self.engine_url).context("engine_url がURLとして不正です")?;
         reqwest::Url::parse(&self.public_base_url)
             .context("public_base_url がURLとして不正です")?;
+        self.admin_address()?;
 
         Ok(())
+    }
+
+    pub fn admin_address(&self) -> Result<SocketAddr> {
+        let address: SocketAddr = self
+            .admin_listen
+            .parse()
+            .context("admin_listen がIPアドレスとポートとして不正です")?;
+        if address.port() == 0 || !is_private_or_local(address.ip()) {
+            bail!("admin_listen はプライベートまたはループバックのIPアドレスで指定してください");
+        }
+        Ok(address)
+    }
+}
+
+fn is_private_or_local(address: IpAddr) -> bool {
+    match address {
+        IpAddr::V4(address) => address.is_private() || address.is_loopback(),
+        IpAddr::V6(address) => address.is_unique_local() || address.is_loopback(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::net::IpAddr;
+
+    use super::is_private_or_local;
+
+    #[test]
+    fn 管理画面はローカル用アドレスだけを許可する() {
+        assert!(is_private_or_local(IpAddr::V4(
+            "192.168.1.10".parse().unwrap()
+        )));
+        assert!(is_private_or_local(IpAddr::V4(
+            "127.0.0.1".parse().unwrap()
+        )));
+        assert!(is_private_or_local(IpAddr::V6("fd00::1".parse().unwrap())));
+        assert!(!is_private_or_local(IpAddr::V4("0.0.0.0".parse().unwrap())));
+        assert!(!is_private_or_local(IpAddr::V4("8.8.8.8".parse().unwrap())));
     }
 }
