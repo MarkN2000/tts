@@ -20,7 +20,7 @@ Content-Type: application/json
 例：
 
 ```http
-POST /api/v1-k7m4q2/tts
+POST /api/v1/tts
 ```
 
 ```json
@@ -66,17 +66,47 @@ GET /speakers
 
 ### LAN 内管理画面
 
-辞書編集用の画面と API は、公開 API と別の `admin_listen` で提供する。
+音声生成 Web UI と辞書編集用の画面・API は、公開 API と別の `admin_listen` で提供する。
 
 ```http
+GET /webui
 GET /dictionary
 ```
 
 - 画面の HTML、CSS、JavaScript は実行ファイルへ埋め込み、追加ファイルとして配布しない。
 - `admin_listen` にはプライベート IPv4、ループバックアドレス、または IPv6 のユニークローカルアドレスだけを指定できる。
 - Cloudflare Tunnel は公開用の `listen` だけへ接続し、`admin_listen` は公開しない。
-- 公開用の `listen` では、管理画面と次の辞書 API を提供しない。
+- 公開用の `listen` では、管理画面、Web UI 用の音声生成 API、次の辞書 API を提供しない。
 - LAN 外からの直接接続は OS のファイアウォールでも拒否する。
+
+#### 音声生成 Web UI
+
+`GET /webui` では、起動時に取得した話者・スタイルを選び、入力したテキストから音声を生成する画面を提供する。
+
+- 話者一覧には管理用の `GET /speakers` を使用し、公開用と同じ未加工の JSON を返す。
+- 画面では話者名とスタイル名を表示し、音声生成時の `id` にはスタイル ID を使用する。
+- 既定の話者・スタイルが選ばれた場合は `id` を省略し、`default_id` を使用する。
+- 入力テキストのトリム、Unicode 正規化、その他の自動変換は行わない。
+
+```http
+POST /api/webui/tts
+Content-Type: application/json
+```
+
+リクエスト本文は公開用の音声生成 API と同じ形式とする。成功時は、実際に使用した話者のライセンスと、管理画面と同一オリジンの相対音声 URL を返す。
+
+```json
+{
+  "license": "Aivis Common Model License (ACML) 1.0",
+  "url": "/audio/7f4a....ogg"
+}
+```
+
+- 音声生成、キャッシュ、排他制御は公開用の音声生成 API と共通にする。
+- 応答は Ogg の生成と保存が完了してから返し、生成中の WAV は配信しない。
+- 画面では返された Ogg を再生し、同じ URL からファイルとしてダウンロードできるようにする。
+- 管理用の `GET /audio/{audio_id}.ogg` は、公開用と同じ保存済み Ogg を `Content-Type: audio/ogg` で返す。
+- Web UI の HTML、CSS、JavaScript は実行ファイルへ埋め込み、追加ファイルとして配布しない。
 
 #### ユーザー辞書取得
 
@@ -216,7 +246,7 @@ DELETE /api/user-dict/words/{word_uuid}
 - `config.toml` は実行ファイルと同じディレクトリから読み込む。
 - 相対指定の `cache_dir` は、`config.toml` があるディレクトリを基準に解決する。
 - 起動中のファイル変更は反映せず、反映には再起動を必要とする。
-- `api_revision` は `v1-k7m4q2` のように、API バージョンと推測しにくいランダム文字列を組み合わせる。
+- `api_revision` は `v1`、`v2` のように公開 API のリビジョンを表す値とする。
 - API の破壊的変更時は `api_revision` を変更し、古い API パスは提供しない。
 - `api_revision` は古い仕様の利用とバージョン番号だけによる誤接続を防ぐための値であり、認証情報としては扱わない。
 - 起動時に、音声内容へ影響する次の設定を前回起動時の値と比較する。
@@ -236,7 +266,7 @@ listen = "127.0.0.1:8080"
 admin_listen = "192.168.1.10:8081"
 engine_url = "http://192.168.1.11:10101"
 public_base_url = "https://tts.markn2000.com"
-api_revision = "v1-k7m4q2"
+api_revision = "v1"
 
 default_id = "1878365376"
 
@@ -270,8 +300,8 @@ config.toml
 - `POST /api/*/tts` へのレート制限は Cloudflare 側で行う。
 - 音声取得用の `GET /audio/{audio_id}.ogg` は生成 API のレート制限対象に含めない。
 - URL の `api_revision` はアクセス制限の代替として扱わない。
-- 辞書管理画面と辞書 API は `admin_listen` だけで提供し、Cloudflare Tunnel の接続先に含めない。
-- LAN 内の利用者は辞書を変更できるため、信頼できるネットワークでだけ使用する。
+- 音声生成 Web UI、Web UI 用の音声生成 API、辞書管理画面、辞書 API は `admin_listen` だけで提供し、Cloudflare Tunnel の接続先に含めない。
+- LAN 内の利用者は音声を生成して辞書を変更できるため、信頼できるネットワークでだけ使用する。
 
 ## 10. 初版の対象外
 

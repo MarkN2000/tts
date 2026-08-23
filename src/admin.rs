@@ -48,7 +48,7 @@ async fn script() -> impl IntoResponse {
     static_response("text/javascript; charset=utf-8", SCRIPT)
 }
 
-fn static_response(content_type: &'static str, body: &'static str) -> impl IntoResponse {
+pub(crate) fn static_response(content_type: &'static str, body: &'static str) -> impl IntoResponse {
     (
         [(CONTENT_TYPE, content_type), (CACHE_CONTROL, "no-store")],
         body,

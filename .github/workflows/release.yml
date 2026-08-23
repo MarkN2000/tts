@@ -19,6 +19,7 @@ jobs:
         run: |
           cargo test --locked
           node --test tests/dictionary-ui.test.cjs
+          node --check web/webui.js
 
       - name: Build
         run: cargo build --release --locked
@@ -47,6 +48,7 @@ jobs:
         run: |
           cargo test --locked
           node --test tests/dictionary-ui.test.cjs
+          node --check web/webui.js
 
       - name: Install musl target
         run: |

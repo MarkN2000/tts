@@ -4,6 +4,7 @@ mod config;
 mod converter;
 mod dictionary;
 mod engine;
+mod webui;
 
 use std::{collections::HashMap, env, sync::Arc, time::Duration};
 
@@ -43,7 +44,7 @@ pub(crate) struct AppState {
 }
 
 #[derive(Deserialize)]
-struct TtsRequest {
+pub(crate) struct TtsRequest {
     id: Option<String>,
     text: String,
 }
@@ -52,6 +53,11 @@ struct TtsRequest {
 struct TtsResponse {
     license: String,
     url: String,
+}
+
+pub(crate) struct GeneratedAudio {
+    pub(crate) audio_id: String,
+    pub(crate) license: String,
 }
 
 #[tokio::main]
@@ -111,7 +117,7 @@ async fn main() -> Result<()> {
         .route("/audio/{filename}", get(get_audio))
         .layer(DefaultBodyLimit::disable())
         .with_state(Arc::clone(&state));
-    let admin_app = admin::router(state);
+    let admin_app = admin::router(Arc::clone(&state)).merge(webui::router(state));
     let public_listener = TcpListener::bind(&listen)
         .await
         .with_context(|| format!("{listen} で待受を開始できません"))?;
@@ -120,6 +126,7 @@ async fn main() -> Result<()> {
         .with_context(|| format!("{admin_address} で管理画面の待受を開始できません"))?;
 
     println!("TTS サーバーを http://{listen}{api_path} で開始しました");
+    println!("音声生成 Web UI を http://{admin_address}/webui で開始しました");
     println!("辞書管理画面を http://{admin_address}/dictionary で開始しました");
 
     let (shutdown_sender, shutdown_receiver) = watch::channel(false);
@@ -142,6 +149,21 @@ async fn generate_audio(
     State(state): State<Arc<AppState>>,
     Json(request): Json<TtsRequest>,
 ) -> Result<Json<TtsResponse>, AppError> {
+    let generated = generate_cached_audio(&state, request).await?;
+    Ok(Json(TtsResponse {
+        license: generated.license,
+        url: public_audio_url(&state.config.public_base_url, &generated.audio_id),
+    }))
+}
+
+fn public_audio_url(public_base_url: &str, audio_id: &str) -> String {
+    format!("{public_base_url}/audio/{audio_id}.ogg")
+}
+
+pub(crate) async fn generate_cached_audio(
+    state: &AppState,
+    request: TtsRequest,
+) -> Result<GeneratedAudio> {
     let speaker_id = request
         .id
         .as_deref()
@@ -169,20 +191,20 @@ async fn generate_audio(
     }
 
     let speaker = &state.speakers[&speaker_id];
-    Ok(Json(TtsResponse {
+    Ok(GeneratedAudio {
+        audio_id,
         license: speaker.license.clone(),
-        url: format!("{}/audio/{}.ogg", state.config.public_base_url, audio_id),
-    }))
+    })
 }
 
-async fn get_speakers(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+pub(crate) async fn get_speakers(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     (
         [(CONTENT_TYPE, "application/json")],
         state.speakers_json.clone(),
     )
 }
 
-async fn get_audio(
+pub(crate) async fn get_audio(
     State(state): State<Arc<AppState>>,
     Path(filename): Path<String>,
 ) -> Result<Response<Body>, StatusCode> {
@@ -260,7 +282,7 @@ async fn wait_for_shutdown(mut receiver: watch::Receiver<bool>) {
     }
 }
 
-struct AppError(anyhow::Error);
+pub(crate) struct AppError(anyhow::Error);
 
 impl<E> From<E> for AppError
 where
@@ -280,7 +302,7 @@ impl IntoResponse for AppError {
 
 #[cfg(test)]
 mod tests {
-    use super::{is_valid_audio_id, make_audio_id};
+    use super::{is_valid_audio_id, make_audio_id, public_audio_url};
 
     #[test]
     fn 同じ話者とテキストは同じaudio_idになる() {
@@ -304,5 +326,13 @@ mod tests {
         assert!(is_valid_audio_id(&id));
         assert!(!is_valid_audio_id("../config.toml"));
         assert!(!is_valid_audio_id(&"g".repeat(64)));
+    }
+
+    #[test]
+    fn 公開音声urlは公開用base_urlを使用する() {
+        assert_eq!(
+            public_audio_url("https://tts.example.com", "audio-id"),
+            "https://tts.example.com/audio/audio-id.ogg"
+        );
     }
 }

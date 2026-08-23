@@ -23,14 +23,14 @@ tts-server.exe  # Linuxでは tts-server
 config.toml
 ```
 
-`config.toml` の `engine_url`、`public_base_url`、`default_id` などを環境に合わせて変更し、実行ファイルを起動してください。相対指定の `cache_dir` は、このディレクトリを基準にします。辞書管理用の `admin_listen` には、管理画面を開く端末から接続できる、このPCのプライベートIPアドレスを指定します。
+`config.toml` の `engine_url`、`public_base_url`、`default_id` などを環境に合わせて変更し、実行ファイルを起動してください。相対指定の `cache_dir` は、このディレクトリを基準にします。LAN内管理画面用の `admin_listen` には、管理画面を開く端末から接続できる、このPCのプライベートIPアドレスを指定します。
 
 ## API
 
 音声を生成します。`id` は省略でき、存在しないIDも `default_id` に置き換わります。
 
 ```console
-curl -X POST http://127.0.0.1:8080/api/v1-k7m4q2/tts \
+curl -X POST http://127.0.0.1:8080/api/v1/tts \
   -H "Content-Type: application/json" \
   -d '{"id":"258599616","text":"こんにちは"}'
 ```
@@ -50,6 +50,16 @@ curl -X POST http://127.0.0.1:8080/api/v1-k7m4q2/tts \
 curl http://127.0.0.1:8080/speakers
 ```
 
+## 音声生成 Web UI
+
+起動後、LAN内のブラウザで次の画面を開くと、話者・スタイルとテキストを選んで音声を生成できます。生成後は保存済みの Ogg を再生し、そのままファイルとしてダウンロードできます。
+
+```text
+http://192.168.1.10:8081/webui
+```
+
+URLのIPアドレスとポートは `admin_listen` に合わせてください。Web UI は公開用ポートや Cloudflare Tunnel では提供しません。
+
 ## ユーザー辞書
 
 起動後、LAN内のブラウザで次の管理画面を開くと、VOICEVOXとAivisSpeechに共通する単一語を追加・編集・削除できます。アクセントは読みの高低図を見ながらスライダーで選択でき、保存前には `default_id` の話者で試聴できます。画面は実行ファイルへ埋め込まれているため、配布ファイルは増えません。
@@ -66,7 +76,7 @@ URLのIPアドレスとポートは `admin_listen` に合わせてください�
 
 Cloudflare Tunnel は `tts.markn2000.com` を公開用の `http://127.0.0.1:8080` だけへ転送します。管理用の8081番ポートはTunnelへ設定しないでください。生成 API のレート制限は Cloudflare 側で `POST /api/*/tts` を対象に設定し、`GET /audio/*` は対象外とします。
 
-APIの破壊的変更時は、推測しにくい新しい値へ `api_revision` を変更してください。これは認証情報ではありません。
+APIの破壊的変更時は、新しい値へ `api_revision` を変更してください。これは認証情報ではありません。
 
 詳しい動作は [SPEC.md](SPEC.md) を参照してください。
 
@@ -88,7 +98,7 @@ cargo clippy --all-targets -- -D warnings
 どちらにも実行ファイルと `config.toml` が含まれます。
 
 ```console
-git tag v0.1.0
+git tag v0.2.0
 git push origin main
-git push origin v0.1.0
+git push origin v0.2.0
 ```
