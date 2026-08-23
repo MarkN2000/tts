@@ -1,4 +1,7 @@
-use std::{fs, path::PathBuf};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+};
 
 use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
@@ -35,14 +38,18 @@ impl AudioCodec {
 }
 
 impl Config {
-    pub fn load(path: &str) -> Result<Self> {
+    pub fn load(path: &Path) -> Result<Self> {
         let source = fs::read_to_string(path)
-            .with_context(|| format!("設定ファイル {path} を読み込めません"))?;
+            .with_context(|| format!("設定ファイル {path:?} を読み込めません"))?;
         let mut config: Self =
-            toml::from_str(&source).with_context(|| format!("設定ファイル {path} が不正です"))?;
+            toml::from_str(&source).with_context(|| format!("設定ファイル {path:?} が不正です"))?;
 
         config.engine_url = config.engine_url.trim_end_matches('/').to_owned();
         config.public_base_url = config.public_base_url.trim_end_matches('/').to_owned();
+        if config.cache_dir.is_relative() {
+            let base_directory = path.parent().unwrap_or_else(|| Path::new("."));
+            config.cache_dir = base_directory.join(&config.cache_dir);
+        }
         config.validate()?;
         Ok(config)
     }

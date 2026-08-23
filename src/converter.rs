@@ -22,17 +22,23 @@ impl FfmpegConverter {
     }
 
     pub async fn verify(&self) -> Result<()> {
-        let status = Command::new(&self.executable)
-            .arg("-version")
+        let output = Command::new(&self.executable)
+            .args(["-hide_banner", "-encoders"])
             .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status()
+            .output()
             .await
             .with_context(|| format!("FFmpeg {:?} を起動できません", self.executable))?;
 
-        if !status.success() {
+        if !output.status.success() {
             bail!("FFmpeg の動作確認に失敗しました");
+        }
+        let encoders = String::from_utf8_lossy(&output.stdout);
+        let expected = self.codec.ffmpeg_encoder();
+        let available = encoders
+            .lines()
+            .any(|line| line.split_whitespace().nth(1) == Some(expected));
+        if !available {
+            bail!("FFmpeg でエンコーダー {expected} を利用できません");
         }
         Ok(())
     }
@@ -41,6 +47,7 @@ impl FfmpegConverter {
         let temporary_path = cache.temporary_path(audio_id);
         let output_path = cache.audio_path(audio_id);
         remove_if_exists(&temporary_path).await?;
+        let _temporary_output = TemporaryOutput::new(temporary_path.clone());
 
         let mut child = Command::new(&self.executable)
             .args(["-hide_banner", "-loglevel", "error", "-y", "-i", "pipe:0"])
@@ -88,6 +95,22 @@ impl FfmpegConverter {
         fs::rename(&temporary_path, &output_path)
             .await
             .context("変換済み音声をキャッシュへ移動できません")
+    }
+}
+
+struct TemporaryOutput {
+    path: PathBuf,
+}
+
+impl TemporaryOutput {
+    fn new(path: PathBuf) -> Self {
+        Self { path }
+    }
+}
+
+impl Drop for TemporaryOutput {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.path);
     }
 }
 

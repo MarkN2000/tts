@@ -3,7 +3,7 @@ mod config;
 mod converter;
 mod engine;
 
-use std::{collections::HashMap, sync::Arc, time::Duration};
+use std::{collections::HashMap, env, sync::Arc, time::Duration};
 
 use anyhow::{Context, Result};
 use axum::{
@@ -48,7 +48,11 @@ struct TtsResponse {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let config = Config::load("config.toml")?;
+    let executable = env::current_exe().context("実行ファイルの場所を取得できません")?;
+    let executable_directory = executable
+        .parent()
+        .context("実行ファイルのディレクトリを取得できません")?;
+    let config = Config::load(&executable_directory.join("config.toml"))?;
     let converter = FfmpegConverter::new(
         config.ffmpeg_path.clone(),
         config.codec,
@@ -190,6 +194,9 @@ fn spawn_cache_cleanup(state: Arc<AppState>) {
         interval.tick().await;
         loop {
             interval.tick().await;
+            let Ok(_permit) = state.generation_lock.acquire().await else {
+                return;
+            };
             if let Err(error) = state.cache.cleanup().await {
                 eprintln!("期限切れキャッシュの削除に失敗しました: {error:#}");
             }
