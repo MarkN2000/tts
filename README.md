@@ -59,3 +59,18 @@ cargo fmt --check
 cargo test
 cargo clippy --all-targets -- -D warnings
 ```
+
+## リリース
+
+`v` で始まるタグをGitHubへpushすると、GitHub Actionsが次の配布物を自動作成し、GitHub Releaseへ添付します。
+
+- Windows x86_64: ZIP
+- Linux x86_64: musl静的リンクのtar.gz
+
+どちらにも実行ファイルと `config.toml` が含まれます。
+
+```console
+git tag v0.1.0
+git push origin main
+git push origin v0.1.0
+```
