@@ -1,0 +1,147 @@
+# TTS 仲介サーバー仕様
+
+## 1. 概要
+
+VOICEVOX Engine または AivisSpeech Engine にテキストを渡して WAV を生成し、FFmpeg で Ogg に変換して期限付きで公開する。
+
+同じ話者 ID と同じ UTF-8 テキストによるリクエストでは、保存済みの Ogg を再利用する。
+
+仲介サーバーは Windows / Linux 向けに、それぞれ単一の Rust 実行ファイルとして配布する。TTS Engine、FFmpeg、Cloudflare Tunnel は外部プロセスとする。
+
+## 2. API
+
+### 音声生成
+
+```http
+POST /api/{api_revision}/tts
+Content-Type: application/json
+```
+
+例：
+
+```http
+POST /api/v1-k7m4q2/tts
+```
+
+```json
+{
+  "id": "258599616",
+  "text": "こんにちは"
+}
+```
+
+- `text` は必須とする。
+- `id` は文字列で、省略可能とする。
+- `api_revision` は設定ファイルの値と完全一致するパスだけを有効とし、それ以外は `404 Not Found` とする。
+- `id` が省略されている場合、または Engine から取得した話者一覧に存在しない場合は `default_id` を使用する。
+- `default_id` が Engine から取得した話者一覧に存在しない場合は起動エラーとする。
+
+成功時は、実際に使用した話者のライセンスと音声 URL だけを返す。
+
+```json
+{
+  "license": "Aivis Common Model License (ACML) 1.0",
+  "url": "https://tts.markn2000.com/audio/7f4a....ogg"
+}
+```
+
+### 音声取得
+
+```http
+GET /audio/{audio_id}.ogg
+```
+
+- `Content-Type: audio/ogg` で保存済み音声を返す。
+- 音声生成用の GET API は提供しない。
+
+## 3. 音声生成
+
+- 接続する TTS Engine は設定ファイルで1つだけ指定し、リクエストでは切り替えない。
+- TTS Engine の HTTP API を利用して WAV を生成する。
+- WAV は FFmpeg で Ogg Opus または Ogg Vorbis に変換する。
+- コーデックとビットレートは設定可能とする。
+- 変換後の Ogg だけを保存し、作業用 WAV と不完全な出力は残さない。
+- 音声生成の同時実行数は全体で1件とする。キャッシュ済み音声の取得は並行して処理できる。
+
+## 4. 話者
+
+- 起動時に TTS Engine の `/speakers` から利用可能な話者 ID、スタイル、`speaker_uuid` を取得する。
+- 各 `speaker_uuid` について `/speaker_info` を取得し、`policy` の先頭にある空でない Markdown 見出しから先頭の `#` を除いたライセンス名を自動取得する。
+- ライセンス名を取得できない場合は `Unknown` とする。
+- 未登録 ID はエラーにせず、`default_id` に置き換える。
+- 応答の `license` には、置き換え後に実際に使用した話者から取得したライセンス名を使用する。
+- 話者情報とライセンスは起動時に取得してメモリに保持し、再取得には仲介サーバーの再起動を必要とする。
+
+## 5. キャッシュ
+
+- キャッシュの一致条件は、置き換え後の話者 ID とデコード済み UTF-8 テキストだけとする。
+- テキストのトリム、Unicode 正規化、その他の自動変換は行わない。
+- 公開用 `audio_id` は一致条件から決定的に生成し、方式は外部 API の仕様に含めない。
+- 保存期間は `cache_days` で日数指定する。
+- 保存期間は生成時点から数え、アクセスされても延長しない。
+- 期限切れファイルはキャッシュミスとして再生成し、起動時および定期的に削除する。
+- 同じキャッシュに対する生成中のリクエストは、先行する1件の完了を待って同じ結果を使用する。
+
+## 6. 設定の反映とキャッシュ削除
+
+- `config.toml` は起動時に1回だけ読み込む。
+- 起動中のファイル変更は反映せず、反映には再起動を必要とする。
+- `api_revision` は `v1-k7m4q2` のように、API バージョンと推測しにくいランダム文字列を組み合わせる。
+- API の破壊的変更時は `api_revision` を変更し、古い API パスは提供しない。
+- `api_revision` は古い仕様の利用とバージョン番号だけによる誤接続を防ぐための値であり、認証情報としては扱わない。
+- 起動時に、音声内容へ影響する次の設定を前回起動時の値と比較する。
+  - TTS Engine の接続先
+  - `cache_revision`
+  - コーデック
+  - ビットレート
+- 比較対象が変更されていた場合は、既存キャッシュをすべて削除する。
+- 同じ接続先のまま Engine または音声モデルを変更した場合は、利用者が `cache_revision` を変更する。
+- `api_revision`、`cache_days`、公開 URL、`default_id` の変更だけではキャッシュを削除しない。
+
+## 7. 設定ファイル例
+
+```toml
+listen = "127.0.0.1:8080"
+engine_url = "http://192.168.1.11:10101"
+public_base_url = "https://tts.markn2000.com"
+api_revision = "v1-k7m4q2"
+
+default_id = "258599616"
+
+cache_dir = "./cache"
+cache_days = 7
+cache_revision = 1
+
+ffmpeg_path = "ffmpeg"
+codec = "opus"
+bitrate_kbps = 48
+```
+
+## 8. 配布と実行条件
+
+配布物は OS ごとの実行ファイルと `config.toml` の2ファイルとする。
+
+```text
+tts-server.exe
+config.toml
+```
+
+- FFmpeg は同梱せず、`ffmpeg_path` または `PATH` から実行できることを前提とする。
+- 指定した TTS Engine は別途起動済みであることを前提とする。
+- キャッシュディレクトリは初回起動時に作成する。
+- FFmpeg、設定、TTS Engine への接続と話者情報の取得を起動時に確認し、利用できない場合は起動エラーとする。
+
+## 9. アクセス制限
+
+- 生成 API は認証なしで公開する。
+- `POST /api/*/tts` へのレート制限は Cloudflare 側で行う。
+- 音声取得用の `GET /audio/{audio_id}.ogg` は生成 API のレート制限対象に含めない。
+- URL の `api_revision` はアクセス制限の代替として扱わない。
+
+## 10. 初版の対象外
+
+- リクエストごとの VOICEVOX / AivisSpeech 切り替え
+- アプリ内の認証、API キー、利用者別レート制限
+- 音声生成用 GET API
+- 起動中の設定ファイル再読み込み
+- FFmpeg の同梱
