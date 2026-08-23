@@ -117,7 +117,7 @@ cache_days = 7
 cache_revision = 1
 
 ffmpeg_path = "ffmpeg"
-codec = "opus"
+codec = "vorbis"
 bitrate_kbps = 48
 ```
 
