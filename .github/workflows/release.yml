@@ -30,13 +30,13 @@ jobs:
           New-Item -ItemType Directory -Path dist
           Copy-Item target/release/tts-server.exe dist/tts-server.exe
           Copy-Item config.toml dist/config.toml
-          Compress-Archive -Path dist/tts-server.exe, dist/config.toml -DestinationPath "tts-server-$env:GITHUB_REF_NAME-windows-x86_64.zip"
+          Compress-Archive -Path dist/tts-server.exe, dist/config.toml -DestinationPath "tts-server-windows-x86_64.zip"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v7
         with:
           name: release-windows
-          path: tts-server-${{ github.ref_name }}-windows-x86_64.zip
+          path: tts-server-windows-x86_64.zip
 
   build-linux:
     name: Build Linux x86_64
@@ -64,13 +64,13 @@ jobs:
           mkdir dist
           cp target/x86_64-unknown-linux-musl/release/tts-server dist/tts-server
           cp config.toml dist/config.toml
-          tar -czf "tts-server-${GITHUB_REF_NAME}-linux-x86_64.tar.gz" -C dist tts-server config.toml
+          tar -czf "tts-server-linux-x86_64.tar.gz" -C dist tts-server config.toml
 
       - name: Upload artifact
         uses: actions/upload-artifact@v7
         with:
           name: release-linux
-          path: tts-server-${{ github.ref_name }}-linux-x86_64.tar.gz
+          path: tts-server-linux-x86_64.tar.gz
 
   release:
     name: Create GitHub Release
