@@ -111,10 +111,4 @@ cargo clippy --all-targets -- -D warnings
 - Windows x86_64: ZIP
 - Linux x86_64: musl静的リンクのtar.gzと、自己更新用raw実行ファイル
 
-WindowsのZIPとLinuxのtar.gzには、実行ファイルと`config.toml`が含まれます。自己更新用raw実行ファイルの名前は`tts-server-linux-x86_64`で、バージョン番号は付けません。
-
-```console
-git tag v0.3.0
-git push origin main
-git push origin v0.3.0
-```
+WindowsのZIPとLinuxのtar.gzには、実行ファイルと`config.toml`が含まれます。
