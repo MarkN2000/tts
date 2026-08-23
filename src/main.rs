@@ -69,15 +69,17 @@ async fn main() -> Result<()> {
         );
     }
 
-    let cache = AudioCache::new(config.cache_dir.clone(), config.cache_days);
-    cache
-        .prepare(&CacheSignature {
+    let cache = AudioCache::new(
+        config.cache_dir.clone(),
+        config.cache_days,
+        CacheSignature {
             engine_url: config.engine_url.clone(),
             cache_revision: config.cache_revision,
             codec: config.codec,
             bitrate_kbps: config.bitrate_kbps,
-        })
-        .await?;
+        },
+    );
+    cache.prepare().await?;
 
     let api_path = format!("/api/{}/tts", config.api_revision);
     let listen = config.listen.clone();
@@ -127,6 +129,7 @@ async fn generate_audio(
             .await
             .map_err(|_| anyhow::anyhow!("音声生成ロックが閉じられました"))?;
 
+        state.cache.ensure_ready().await?;
         if state.cache.find(&audio_id).await?.is_none() {
             let wav = state.engine.synthesize(&speaker_id, &request.text).await?;
             state

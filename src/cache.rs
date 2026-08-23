@@ -15,9 +15,10 @@ const STATE_FILE: &str = ".cache-state.json";
 pub struct AudioCache {
     directory: PathBuf,
     lifetime: Duration,
+    signature: CacheSignature,
 }
 
-#[derive(Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct CacheSignature {
     pub engine_url: String,
     pub cache_revision: u64,
@@ -26,14 +27,20 @@ pub struct CacheSignature {
 }
 
 impl AudioCache {
-    pub fn new(directory: PathBuf, cache_days: u64) -> Self {
+    pub fn new(directory: PathBuf, cache_days: u64, signature: CacheSignature) -> Self {
         Self {
             directory,
             lifetime: Duration::from_secs(cache_days * 86_400),
+            signature,
         }
     }
 
-    pub async fn prepare(&self, signature: &CacheSignature) -> Result<()> {
+    pub async fn prepare(&self) -> Result<()> {
+        self.ensure_ready().await?;
+        self.cleanup_files().await
+    }
+
+    pub async fn ensure_ready(&self) -> Result<()> {
         fs::create_dir_all(&self.directory).await.with_context(|| {
             format!(
                 "キャッシュディレクトリ {:?} を作成できません",
@@ -48,12 +55,12 @@ impl AudioCache {
             Err(error) => return Err(error).context("キャッシュ状態を読み込めません"),
         };
 
-        if previous.as_ref() != Some(signature) {
+        if previous.as_ref() != Some(&self.signature) {
             self.clear_audio_files().await?;
-            self.write_state(signature).await?;
+            self.write_state().await?;
         }
 
-        self.cleanup().await
+        Ok(())
     }
 
     pub fn audio_path(&self, audio_id: &str) -> PathBuf {
@@ -78,6 +85,11 @@ impl AudioCache {
     }
 
     pub async fn cleanup(&self) -> Result<()> {
+        self.ensure_ready().await?;
+        self.cleanup_files().await
+    }
+
+    async fn cleanup_files(&self) -> Result<()> {
         let mut entries = fs::read_dir(&self.directory)
             .await
             .context("キャッシュディレクトリを確認できません")?;
@@ -114,10 +126,10 @@ impl AudioCache {
         Ok(())
     }
 
-    async fn write_state(&self, signature: &CacheSignature) -> Result<()> {
+    async fn write_state(&self) -> Result<()> {
         let state_path = self.directory.join(STATE_FILE);
         let temporary_path = self.directory.join(format!("{STATE_FILE}.tmp"));
-        let bytes = serde_json::to_vec_pretty(signature)?;
+        let bytes = serde_json::to_vec_pretty(&self.signature)?;
 
         fs::write(&temporary_path, bytes)
             .await
@@ -150,5 +162,45 @@ async fn remove_if_exists(path: &Path) -> Result<()> {
         Ok(()) => Ok(()),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
         Err(error) => Err(error).with_context(|| format!("ファイル {path:?} を削除できません")),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    use tokio::fs;
+
+    use super::{AudioCache, CacheSignature, STATE_FILE};
+    use crate::config::AudioCodec;
+
+    #[tokio::test]
+    async fn 削除されたキャッシュディレクトリを再作成する() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let directory = std::env::temp_dir().join(format!(
+            "tts-server-cache-test-{}-{unique}",
+            std::process::id()
+        ));
+        let cache = AudioCache::new(
+            directory.clone(),
+            7,
+            CacheSignature {
+                engine_url: "http://127.0.0.1:10101".to_owned(),
+                cache_revision: 1,
+                codec: AudioCodec::Opus,
+                bitrate_kbps: 48,
+            },
+        );
+
+        cache.prepare().await.unwrap();
+        fs::remove_dir_all(&directory).await.unwrap();
+        cache.ensure_ready().await.unwrap();
+
+        assert!(directory.is_dir());
+        assert!(directory.join(STATE_FILE).is_file());
+        fs::remove_dir_all(directory).await.unwrap();
     }
 }
