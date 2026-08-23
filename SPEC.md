@@ -125,6 +125,27 @@ Content-Type: application/json
 }
 ```
 
+#### ユーザー辞書試聴
+
+```http
+POST /api/user-dict/preview
+Content-Type: application/json
+```
+
+```json
+{
+  "pronunciation": "タンゴ",
+  "accent_type": 1
+}
+```
+
+- 入力中の読みとアクセント位置を使用し、`default_id` の話者で試聴用 WAV を生成する。
+- 成功時は `Content-Type: audio/wav`、`Cache-Control: no-store` で WAV を直接返す。
+- 試聴ではユーザー辞書を変更せず、音声ファイルとキャッシュを保存しない。
+- 入力したカタカナから生成した音声クエリのモーラを1つのアクセント句へまとめ、指定したアクセント位置で音高を再計算して合成する。
+- アクセント位置がモーラ数を超える場合は `400 Bad Request` とする。
+- 試聴は音声生成および辞書変更と同じ排他制御内で実行する。
+
 #### ユーザー辞書更新・削除
 
 ```http
@@ -144,7 +165,8 @@ DELETE /api/user-dict/words/{word_uuid}
 - `word_type` は `PROPER_NOUN`、`COMMON_NOUN`、`VERB`、`ADJECTIVE`、`SUFFIX` の5種類とする。
 - AivisSpeech 固有の複合語および共通外の品詞は一覧と編集対象から除外し、`has_excluded_words` で存在を通知する。
 - 辞書は TTS Engine 側を正とし、仲介サーバーには複製しない。
-- 追加、更新、削除は音声生成と同じ排他制御内で行い、成功後に音声キャッシュを全削除する。
+- 追加、更新、削除は音声生成と同じ排他制御内で行い、辞書変更前に音声キャッシュを全削除する。
+- 音声キャッシュの削除に失敗した場合は、TTS Engine の辞書を変更しない。
 - エラー応答は `{ "error": "メッセージ" }` とする。
 
 ## 3. 音声生成
@@ -252,5 +274,5 @@ config.toml
 - 音声生成用 GET API
 - 起動中の設定ファイル再読み込み
 - FFmpeg の同梱
-- ユーザー辞書の試聴、検索、一括操作、インポート、エクスポート
+- ユーザー辞書の検索、一括操作、インポート、エクスポート
 - AivisSpeech 固有の複合語および共通外の品詞の編集

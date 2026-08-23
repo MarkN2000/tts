@@ -21,14 +21,19 @@ const elements = {
   list: document.querySelector("#word-list"),
   count: document.querySelector("#word-count"),
   empty: document.querySelector("#empty-message"),
+  preview: document.querySelector("#preview-button"),
   save: document.querySelector("#save-button"),
 };
 
 let words = [];
+let previewAudio;
+let previewAudioUrl;
+let previewAbortController;
 
 document.querySelector("#add-button").addEventListener("click", () => openEditor());
 document.querySelector("#cancel-button").addEventListener("click", closeEditor);
 elements.form.addEventListener("submit", saveWord);
+elements.preview.addEventListener("click", previewWord);
 
 loadDictionary();
 
@@ -85,6 +90,7 @@ function renderWords() {
 }
 
 function openEditor(word = null) {
+  releasePreview();
   elements.form.reset();
   elements.uuid.value = word?.uuid ?? "";
   elements.surface.value = word?.surface ?? "";
@@ -99,8 +105,59 @@ function openEditor(word = null) {
 }
 
 function closeEditor() {
+  releasePreview();
   elements.editor.hidden = true;
   elements.form.reset();
+}
+
+function releasePreview() {
+  previewAbortController?.abort();
+  previewAbortController = undefined;
+  previewAudio?.pause();
+  previewAudio = undefined;
+  if (previewAudioUrl) URL.revokeObjectURL(previewAudioUrl);
+  previewAudioUrl = undefined;
+}
+
+async function previewWord() {
+  if (!elements.form.reportValidity()) return;
+  releasePreview();
+  const controller = new AbortController();
+  previewAbortController = controller;
+  elements.preview.disabled = true;
+  elements.preview.textContent = "試聴を準備中…";
+  setStatus("");
+  try {
+    const response = await fetch("/api/user-dict/preview", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      signal: controller.signal,
+      body: JSON.stringify({
+        pronunciation: elements.pronunciation.value,
+        accent_type: Number(elements.accentType.value),
+      }),
+    });
+    if (!response.ok) throw new Error(await readError(response));
+    const blob = await response.blob();
+    if (previewAbortController !== controller) return;
+    previewAudioUrl = URL.createObjectURL(blob);
+    previewAudio = new Audio(previewAudioUrl);
+    previewAudio.addEventListener("ended", releasePreview, { once: true });
+    previewAudio.addEventListener("error", () => {
+      releasePreview();
+      setStatus("試聴音声を再生できませんでした", true);
+    }, { once: true });
+    await previewAudio.play();
+    if (previewAbortController !== controller) return;
+    setStatus("入力中の読みとアクセントで試聴しています。辞書には保存されていません");
+  } catch (error) {
+    if (error.name === "AbortError") return;
+    releasePreview();
+    setStatus(error.message || "試聴できませんでした", true);
+  } finally {
+    elements.preview.disabled = false;
+    elements.preview.textContent = "この読みで試聴";
+  }
 }
 
 async function saveWord(event) {

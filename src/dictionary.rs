@@ -60,12 +60,7 @@ impl UserDictWordInput {
         if self.surface.trim().is_empty() {
             return Err("単語を入力してください");
         }
-        if self.pronunciation.is_empty()
-            || !self
-                .pronunciation
-                .chars()
-                .all(|character| matches!(character, '\u{30A1}'..='\u{30F4}' | '\u{30FC}'))
-        {
+        if !is_valid_pronunciation(&self.pronunciation) {
             return Err("読みは全角カタカナで入力してください");
         }
         if self.priority > 10 {
@@ -83,6 +78,13 @@ impl UserDictWordInput {
             ("priority", self.priority.to_string()),
         ]
     }
+}
+
+pub fn is_valid_pronunciation(pronunciation: &str) -> bool {
+    !pronunciation.is_empty()
+        && pronunciation
+            .chars()
+            .all(|character| matches!(character, '\u{30A1}'..='\u{30F4}' | '\u{30FC}'))
 }
 
 #[derive(Clone, Debug, Serialize)]

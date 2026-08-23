@@ -8,10 +8,14 @@ use axum::{
     routing::{get, post},
     Json, Router,
 };
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::{dictionary::UserDictWordInput, AppState};
+use crate::{
+    dictionary::{is_valid_pronunciation, UserDictWordInput},
+    engine::UserDictPreviewError,
+    AppState,
+};
 
 const PAGE: &str = include_str!("../web/dictionary.html");
 const STYLES: &str = include_str!("../web/dictionary.css");
@@ -23,6 +27,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/dictionary.css", get(styles))
         .route("/dictionary.js", get(script))
         .route("/api/user-dict", get(load_dictionary))
+        .route("/api/user-dict/preview", post(preview_word))
         .route("/api/user-dict/words", post(add_word))
         .route(
             "/api/user-dict/words/{word_uuid}",
@@ -59,6 +64,52 @@ async fn load_dictionary(
         .await
         .map_err(AdminError::engine)?;
     Ok(Json(dictionary))
+}
+
+#[derive(Deserialize)]
+struct PreviewRequest {
+    pronunciation: String,
+    accent_type: u32,
+}
+
+async fn preview_word(
+    State(state): State<Arc<AppState>>,
+    request: Result<Json<PreviewRequest>, JsonRejection>,
+) -> Result<impl IntoResponse, AdminError> {
+    let Json(request) = request.map_err(|_| AdminError::bad_request("JSONリクエストが不正です"))?;
+    if !is_valid_pronunciation(&request.pronunciation) {
+        return Err(AdminError::bad_request(
+            "読みは全角カタカナで入力してください",
+        ));
+    }
+
+    let _permit = state
+        .generation_lock
+        .acquire()
+        .await
+        .map_err(|_| AdminError::internal("排他制御を開始できません", None))?;
+    let wav = match state
+        .engine
+        .synthesize_user_dict_preview(
+            &state.config.default_id,
+            &request.pronunciation,
+            request.accent_type,
+        )
+        .await
+    {
+        Ok(wav) => wav,
+        Err(UserDictPreviewError::InvalidInput) => {
+            return Err(AdminError::bad_request(
+                "読みまたはアクセント位置を確認してください",
+            ));
+        }
+        Err(UserDictPreviewError::Engine(error)) => return Err(AdminError::engine(error)),
+    };
+
+    Ok((
+        [(CONTENT_TYPE, "audio/wav"), (CACHE_CONTROL, "no-store")],
+        wav,
+    ))
 }
 
 #[derive(Serialize)]
