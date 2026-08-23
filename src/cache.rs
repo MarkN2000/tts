@@ -15,6 +15,7 @@ const STATE_FILE: &str = ".cache-state.json";
 pub struct AudioCache {
     directory: PathBuf,
     lifetime: Duration,
+    max_size_bytes: u64,
     signature: CacheSignature,
 }
 
@@ -27,17 +28,23 @@ pub struct CacheSignature {
 }
 
 impl AudioCache {
-    pub fn new(directory: PathBuf, cache_days: u64, signature: CacheSignature) -> Self {
+    pub fn new(
+        directory: PathBuf,
+        cache_days: u64,
+        cache_max_mb: u64,
+        signature: CacheSignature,
+    ) -> Self {
         Self {
             directory,
             lifetime: Duration::from_secs(cache_days * 86_400),
+            max_size_bytes: cache_max_mb * 1024 * 1024,
             signature,
         }
     }
 
     pub async fn prepare(&self) -> Result<()> {
         self.ensure_ready().await?;
-        self.cleanup_files().await
+        self.cleanup_files(None).await
     }
 
     pub async fn ensure_ready(&self) -> Result<()> {
@@ -86,13 +93,19 @@ impl AudioCache {
 
     pub async fn cleanup(&self) -> Result<()> {
         self.ensure_ready().await?;
-        self.cleanup_files().await
+        self.cleanup_files(None).await
     }
 
-    async fn cleanup_files(&self) -> Result<()> {
+    pub async fn cleanup_after_generation(&self, audio_id: &str) -> Result<()> {
+        self.cleanup_files(Some(audio_id)).await
+    }
+
+    async fn cleanup_files(&self, preserved_audio_id: Option<&str>) -> Result<()> {
         let mut entries = fs::read_dir(&self.directory)
             .await
             .context("キャッシュディレクトリを確認できません")?;
+        let mut total_size = 0_u64;
+        let mut eviction_candidates = Vec::new();
 
         while let Some(entry) = entries.next_entry().await? {
             let path = entry.path();
@@ -106,7 +119,27 @@ impl AudioCache {
             let metadata = entry.metadata().await?;
             if !self.is_fresh(&metadata) {
                 remove_if_exists(&path).await?;
+                continue;
             }
+            total_size = total_size.saturating_add(metadata.len());
+            let is_preserved =
+                path.file_stem().and_then(|value| value.to_str()) == preserved_audio_id;
+            if !is_preserved {
+                eviction_candidates.push((
+                    metadata.modified().unwrap_or(SystemTime::UNIX_EPOCH),
+                    metadata.len(),
+                    path,
+                ));
+            }
+        }
+
+        eviction_candidates.sort_by_key(|(modified, _, _)| *modified);
+        for (_, size, path) in eviction_candidates {
+            if total_size <= self.max_size_bytes {
+                break;
+            }
+            remove_if_exists(&path).await?;
+            total_size = total_size.saturating_sub(size);
         }
 
         Ok(())
@@ -167,33 +200,22 @@ async fn remove_if_exists(path: &Path) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use std::time::{SystemTime, UNIX_EPOCH};
+    use std::{
+        path::PathBuf,
+        sync::atomic::{AtomicU64, Ordering},
+        time::Duration,
+    };
 
-    use tokio::fs;
+    use tokio::{fs, time::sleep};
 
     use super::{AudioCache, CacheSignature, STATE_FILE};
     use crate::config::AudioCodec;
 
+    static NEXT_TEST_ID: AtomicU64 = AtomicU64::new(0);
+
     #[tokio::test]
     async fn 削除されたキャッシュディレクトリを再作成する() {
-        let unique = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        let directory = std::env::temp_dir().join(format!(
-            "tts-server-cache-test-{}-{unique}",
-            std::process::id()
-        ));
-        let cache = AudioCache::new(
-            directory.clone(),
-            7,
-            CacheSignature {
-                engine_url: "http://127.0.0.1:10101".to_owned(),
-                cache_revision: 1,
-                codec: AudioCodec::Opus,
-                bitrate_kbps: 48,
-            },
-        );
+        let (cache, directory) = test_cache(1024);
 
         cache.prepare().await.unwrap();
         fs::remove_dir_all(&directory).await.unwrap();
@@ -202,5 +224,50 @@ mod tests {
         assert!(directory.is_dir());
         assert!(directory.join(STATE_FILE).is_file());
         fs::remove_dir_all(directory).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn 容量超過時は古い音声から削除する() {
+        let (cache, directory) = test_cache(1);
+        cache.prepare().await.unwrap();
+
+        fs::write(cache.audio_path("old"), vec![0; 450 * 1024])
+            .await
+            .unwrap();
+        sleep(Duration::from_millis(20)).await;
+        fs::write(cache.audio_path("middle"), vec![0; 450 * 1024])
+            .await
+            .unwrap();
+        sleep(Duration::from_millis(20)).await;
+        fs::write(cache.audio_path("new"), vec![0; 450 * 1024])
+            .await
+            .unwrap();
+
+        cache.cleanup_after_generation("new").await.unwrap();
+
+        assert!(!cache.audio_path("old").is_file());
+        assert!(cache.audio_path("middle").is_file());
+        assert!(cache.audio_path("new").is_file());
+        fs::remove_dir_all(directory).await.unwrap();
+    }
+
+    fn test_cache(cache_max_mb: u64) -> (AudioCache, PathBuf) {
+        let unique = NEXT_TEST_ID.fetch_add(1, Ordering::Relaxed);
+        let directory = std::env::temp_dir().join(format!(
+            "tts-server-cache-test-{}-{unique}",
+            std::process::id()
+        ));
+        let cache = AudioCache::new(
+            directory.clone(),
+            7,
+            cache_max_mb,
+            CacheSignature {
+                engine_url: "http://127.0.0.1:10101".to_owned(),
+                cache_revision: 1,
+                codec: AudioCodec::Opus,
+                bitrate_kbps: 48,
+            },
+        );
+        (cache, directory)
     }
 }

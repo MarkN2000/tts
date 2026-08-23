@@ -72,6 +72,7 @@ async fn main() -> Result<()> {
     let cache = AudioCache::new(
         config.cache_dir.clone(),
         config.cache_days,
+        config.cache_max_mb,
         CacheSignature {
             engine_url: config.engine_url.clone(),
             cache_revision: config.cache_revision,
@@ -136,6 +137,7 @@ async fn generate_audio(
                 .converter
                 .convert(&wav, &state.cache, &audio_id)
                 .await?;
+            state.cache.cleanup_after_generation(&audio_id).await?;
         }
     }
 

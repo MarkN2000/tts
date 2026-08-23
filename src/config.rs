@@ -15,6 +15,7 @@ pub struct Config {
     pub default_id: String,
     pub cache_dir: PathBuf,
     pub cache_days: u64,
+    pub cache_max_mb: u64,
     pub cache_revision: u64,
     pub ffmpeg_path: PathBuf,
     pub codec: AudioCodec,
@@ -66,6 +67,9 @@ impl Config {
         }
         if self.cache_days == 0 || self.cache_days.checked_mul(86_400).is_none() {
             bail!("cache_days は1以上の有効な日数にしてください");
+        }
+        if self.cache_max_mb == 0 || self.cache_max_mb.checked_mul(1024 * 1024).is_none() {
+            bail!("cache_max_mb は1以上の有効な容量にしてください");
         }
         if self.bitrate_kbps == 0 {
             bail!("bitrate_kbps は1以上にしてください");
