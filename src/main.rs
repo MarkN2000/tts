@@ -6,13 +6,16 @@ mod dictionary;
 mod engine;
 mod webui;
 
-use std::{collections::HashMap, env, sync::Arc, time::Duration};
+use std::{collections::HashMap, env, fmt, sync::Arc, time::Duration};
 
 use anyhow::{Context, Result};
 use axum::{
     body::{Body, Bytes},
     extract::{DefaultBodyLimit, Path, State},
-    http::{header::CONTENT_TYPE, Response, StatusCode},
+    http::{
+        header::{CONTENT_TYPE, RETRY_AFTER},
+        Response, StatusCode,
+    },
     response::IntoResponse,
     routing::{get, post},
     Json, Router,
@@ -22,7 +25,7 @@ use sha2::{Digest, Sha256};
 use tokio::{
     fs,
     net::TcpListener,
-    sync::{watch, Semaphore},
+    sync::{watch, Semaphore, SemaphorePermit},
     time,
 };
 
@@ -33,6 +36,9 @@ use crate::{
     engine::{EngineClient, SpeakerMeta},
 };
 
+const MAX_GENERATION_REQUESTS: usize = 10;
+const GENERATION_RETRY_AFTER_SECONDS: &str = "10";
+
 pub(crate) struct AppState {
     pub(crate) config: Config,
     pub(crate) engine: EngineClient,
@@ -41,6 +47,7 @@ pub(crate) struct AppState {
     pub(crate) cache: AudioCache,
     converter: FfmpegConverter,
     pub(crate) generation_lock: Semaphore,
+    generation_slots: Semaphore,
 }
 
 #[derive(Deserialize)]
@@ -107,6 +114,7 @@ async fn main() -> Result<()> {
         cache,
         converter,
         generation_lock: Semaphore::new(1),
+        generation_slots: Semaphore::new(MAX_GENERATION_REQUESTS),
     });
 
     spawn_cache_cleanup(Arc::clone(&state));
@@ -173,6 +181,7 @@ pub(crate) async fn generate_cached_audio(
     let audio_id = make_audio_id(&speaker_id, &request.text);
 
     if state.cache.find(&audio_id).await?.is_none() {
+        let _request_slot = try_enter_generation_queue(&state.generation_slots)?;
         let _permit = state
             .generation_lock
             .acquire()
@@ -284,6 +293,23 @@ async fn wait_for_shutdown(mut receiver: watch::Receiver<bool>) {
 
 pub(crate) struct AppError(anyhow::Error);
 
+#[derive(Debug)]
+struct GenerationQueueFull;
+
+fn try_enter_generation_queue(
+    slots: &Semaphore,
+) -> std::result::Result<SemaphorePermit<'_>, GenerationQueueFull> {
+    slots.try_acquire().map_err(|_| GenerationQueueFull)
+}
+
+impl fmt::Display for GenerationQueueFull {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("音声生成の受付上限に達しました")
+    }
+}
+
+impl std::error::Error for GenerationQueueFull {}
+
 impl<E> From<E> for AppError
 where
     E: Into<anyhow::Error>,
@@ -295,6 +321,15 @@ where
 
 impl IntoResponse for AppError {
     fn into_response(self) -> axum::response::Response {
+        if self.0.is::<GenerationQueueFull>() {
+            eprintln!("音声生成の受付上限に達したためリクエストを拒否しました");
+            return (
+                StatusCode::SERVICE_UNAVAILABLE,
+                [(RETRY_AFTER, GENERATION_RETRY_AFTER_SECONDS)],
+                "音声生成が混み合っています",
+            )
+                .into_response();
+        }
         eprintln!("音声生成エラー: {:#}", self.0);
         (StatusCode::INTERNAL_SERVER_ERROR, "音声生成に失敗しました").into_response()
     }
@@ -302,7 +337,16 @@ impl IntoResponse for AppError {
 
 #[cfg(test)]
 mod tests {
-    use super::{is_valid_audio_id, make_audio_id, public_audio_url};
+    use axum::{
+        http::{header::RETRY_AFTER, StatusCode},
+        response::IntoResponse,
+    };
+    use tokio::sync::Semaphore;
+
+    use super::{
+        is_valid_audio_id, make_audio_id, public_audio_url, try_enter_generation_queue, AppError,
+        GenerationQueueFull, GENERATION_RETRY_AFTER_SECONDS, MAX_GENERATION_REQUESTS,
+    };
 
     #[test]
     fn 同じ話者とテキストは同じaudio_idになる() {
@@ -326,6 +370,29 @@ mod tests {
         assert!(is_valid_audio_id(&id));
         assert!(!is_valid_audio_id("../config.toml"));
         assert!(!is_valid_audio_id(&"g".repeat(64)));
+    }
+
+    #[test]
+    fn 未生成音声は同時に10件まで受け付ける() {
+        let slots = Semaphore::new(MAX_GENERATION_REQUESTS);
+        let mut permits = (0..MAX_GENERATION_REQUESTS)
+            .map(|_| try_enter_generation_queue(&slots).expect("10件までは取得できる"))
+            .collect::<Vec<_>>();
+
+        assert!(try_enter_generation_queue(&slots).is_err());
+        permits.pop();
+        assert!(try_enter_generation_queue(&slots).is_ok());
+    }
+
+    #[test]
+    fn 受付上限超過は再試行時間付きの503を返す() {
+        let response = AppError(anyhow::Error::new(GenerationQueueFull)).into_response();
+
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(
+            response.headers()[RETRY_AFTER],
+            GENERATION_RETRY_AFTER_SECONDS
+        );
     }
 
     #[test]
