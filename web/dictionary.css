@@ -46,6 +46,8 @@ h2 { margin-bottom: 0; font-size: 1.2rem; }
 .description, .count { color: var(--muted); }
 .description { margin-bottom: 0; }
 
+.header-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 10px; }
+
 .primary, .secondary, .danger, .text-button {
   border: 0;
   border-radius: 8px;
@@ -110,7 +112,7 @@ input, select {
 @media (max-width: 640px) {
   .shell { width: min(100% - 24px, 960px); padding-top: 28px; }
   .page-header { align-items: flex-end; }
-  .page-header .primary { white-space: nowrap; }
+  .header-actions button { white-space: nowrap; }
   .form-grid { grid-template-columns: 1fr; }
   .editor, .dictionary { padding: 18px; }
   .word-row { align-items: flex-start; flex-direction: column; }

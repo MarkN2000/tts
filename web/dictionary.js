@@ -21,6 +21,7 @@ const elements = {
   list: document.querySelector("#word-list"),
   count: document.querySelector("#word-count"),
   empty: document.querySelector("#empty-message"),
+  reload: document.querySelector("#reload-button"),
   preview: document.querySelector("#preview-button"),
   save: document.querySelector("#save-button"),
 };
@@ -31,13 +32,16 @@ let previewAudioUrl;
 let previewAbortController;
 
 document.querySelector("#add-button").addEventListener("click", () => openEditor());
+elements.reload.addEventListener("click", () => loadDictionary(true));
 document.querySelector("#cancel-button").addEventListener("click", closeEditor);
 elements.form.addEventListener("submit", saveWord);
 elements.preview.addEventListener("click", previewWord);
 
 loadDictionary();
 
-async function loadDictionary() {
+async function loadDictionary(showSuccess = false) {
+  elements.reload.disabled = true;
+  elements.reload.textContent = "読み込み中…";
   setStatus("読み込み中です…");
   try {
     const response = await fetch("/api/user-dict", { cache: "no-store" });
@@ -46,9 +50,12 @@ async function loadDictionary() {
     words = dictionary.words;
     elements.excluded.hidden = !dictionary.has_excluded_words;
     renderWords();
-    setStatus("");
+    setStatus(showSuccess ? "最新の辞書を読み込みました" : "");
   } catch (error) {
     setStatus(error.message, true);
+  } finally {
+    elements.reload.disabled = false;
+    elements.reload.textContent = "辞書を再読み込み";
   }
 }
 
