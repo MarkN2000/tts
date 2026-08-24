@@ -1,3 +1,31 @@
+const invalidFileNameCharacters = /[\u0000-\u001f\u007f<>:"/\\|?*]/gu;
+
+function sanitizeFileNamePart(value, maxLength, addEllipsis = false) {
+  const cleaned = String(value ?? "")
+    .replace(invalidFileNameCharacters, " ")
+    .replace(/\s+/gu, " ")
+    .trim()
+    .replace(/[. ]+$/u, "");
+  const characters = Array.from(cleaned);
+  const truncated = characters
+    .slice(0, maxLength)
+    .join("")
+    .trim()
+    .replace(/[. ]+$/u, "");
+  return addEllipsis && characters.length > maxLength ? `${truncated}…` : truncated;
+}
+
+function makeDownloadFileName(speakerName, styleName, text) {
+  const speaker = sanitizeFileNamePart(speakerName, 30) || "既定モデル";
+  const style = sanitizeFileNamePart(styleName, 30);
+  const content = sanitizeFileNamePart(text, 20, true) || "音声";
+  return [speaker, style, content].filter(Boolean).join("_") + ".ogg";
+}
+
+function playGeneratedAudio(audio) {
+  void audio.play().catch(() => {});
+}
+
 const elements = {
   status: document.querySelector("#status"),
   form: document.querySelector("#tts-form"),
@@ -41,6 +69,8 @@ function populateSpeakers(speakers) {
       const option = document.createElement("option");
       option.value = String(style.id);
       option.textContent = `${speakerName} / ${styleName}`;
+      option.dataset.speakerName = speakerName;
+      option.dataset.styleName = styleName;
       group.append(option);
     }
 
@@ -72,7 +102,13 @@ async function generateAudio(event) {
     if (typeof result.url !== "string" || typeof result.license !== "string") {
       throw new Error("音声生成の応答が不正です");
     }
-    showResult(result);
+    const selected = elements.speaker.selectedOptions[0];
+    const fileName = makeDownloadFileName(
+      selected?.dataset.speakerName,
+      selected?.dataset.styleName,
+      text,
+    );
+    showResult(result, fileName);
     setStatus("音声を生成しました");
   } catch (error) {
     setStatus(error.message || "音声を生成できませんでした", true);
@@ -81,12 +117,13 @@ async function generateAudio(event) {
   }
 }
 
-function showResult(result) {
+function showResult(result, fileName) {
   elements.license.textContent = `ライセンス: ${result.license}`;
   elements.audio.src = result.url;
   elements.download.href = result.url;
-  elements.download.download = "tts.ogg";
+  elements.download.download = fileName;
   elements.result.hidden = false;
+  playGeneratedAudio(elements.audio);
 }
 
 function setFormEnabled(enabled) {
