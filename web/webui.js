@@ -26,6 +26,12 @@ function playGeneratedAudio(audio) {
   void audio.play().catch(() => {});
 }
 
+function resizeTextArea(textarea) {
+  textarea.style.height = "auto";
+  const borderHeight = textarea.offsetHeight - textarea.clientHeight;
+  textarea.style.height = `${textarea.scrollHeight + borderHeight}px`;
+}
+
 const elements = {
   status: document.querySelector("#status"),
   form: document.querySelector("#tts-form"),
@@ -39,7 +45,14 @@ const elements = {
 };
 
 elements.form.addEventListener("submit", generateAudio);
+elements.text.addEventListener("input", resizeTextInput);
+window.addEventListener("resize", resizeTextInput);
+resizeTextInput();
 loadSpeakers();
+
+function resizeTextInput() {
+  resizeTextArea(elements.text);
+}
 
 async function loadSpeakers() {
   setFormEnabled(false);

@@ -4,13 +4,39 @@ const path = require("node:path");
 const test = require("node:test");
 const vm = require("node:vm");
 
+const html = fs.readFileSync(path.join(__dirname, "../web/webui.html"), "utf8");
+const styles = fs.readFileSync(path.join(__dirname, "../web/webui.css"), "utf8");
 const source = fs.readFileSync(path.join(__dirname, "../web/webui.js"), "utf8")
   .split("\nconst elements = {")[0];
 const context = vm.createContext({});
 vm.runInContext(
-  `${source}\nthis.makeFileName = makeDownloadFileName; this.playAudio = playGeneratedAudio;`,
+  `${source}\nthis.makeFileName = makeDownloadFileName; this.playAudio = playGeneratedAudio; this.resizeTextArea = resizeTextArea;`,
   context,
 );
+
+test("テキスト入力欄は1行から始まり、手動リサイズとスクロールバーを表示しない", () => {
+  assert.match(html, /<textarea[^>]+rows="1"/u);
+  assert.match(
+    styles,
+    /textarea \{ min-height: 44px; overflow-y: hidden; resize: none; \}/u,
+  );
+});
+
+test("テキスト入力欄を内容と境界線に合う高さへ調整する", () => {
+  const textarea = {
+    style: { height: "200px" },
+    offsetHeight: 44,
+    clientHeight: 42,
+    get scrollHeight() {
+      assert.equal(this.style.height, "auto");
+      return 80;
+    },
+  };
+
+  context.resizeTextArea(textarea);
+
+  assert.equal(textarea.style.height, "82px");
+});
 
 test("話者名とスタイル名とテキストからOGGファイル名を作る", () => {
   assert.equal(

@@ -80,7 +80,7 @@ select, textarea {
 }
 
 select { min-height: 44px; }
-textarea { min-height: 168px; resize: vertical; }
+textarea { min-height: 44px; overflow-y: hidden; resize: none; }
 
 button:focus-visible, select:focus-visible, textarea:focus-visible, a:focus-visible {
   outline: 3px solid #8bbfa5;
