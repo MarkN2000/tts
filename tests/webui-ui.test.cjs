@@ -39,8 +39,10 @@ test("テキスト入力欄を内容と境界線に合う高さへ調整する",
 });
 
 test("画面上部の見出しを置かず、状態を生成ボタンの左へ表示する", () => {
-  assert.doesNotMatch(html, /TTS SERVER|<h1|class="page-header"/u);
+  assert.doesNotMatch(html, /TTS SERVER|<h[1-6]|class="page-header"/u);
   assert.doesNotMatch(html, /id="form-title"/u);
+  assert.doesNotMatch(html, /id="result-title"|aria-labelledby="result-title"/u);
+  assert.match(html, /id="result"[^>]+aria-label="生成した音声"/u);
   assert.match(
     html,
     /class="form-actions">\s*<p id="status"[^>]*>[^<]*<\/p>\s*<button id="generate-button"/u,
