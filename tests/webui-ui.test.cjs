@@ -38,6 +38,17 @@ test("テキスト入力欄を内容と境界線に合う高さへ調整する",
   assert.equal(textarea.style.height, "82px");
 });
 
+test("画面上部の見出しを置かず、状態を生成ボタンの左へ表示する", () => {
+  assert.doesNotMatch(html, /TTS SERVER|<h1|class="page-header"/u);
+  assert.doesNotMatch(html, /id="form-title"/u);
+  assert.match(
+    html,
+    /class="form-actions">\s*<p id="status"[^>]*>[^<]*<\/p>\s*<button id="generate-button"/u,
+  );
+  assert.match(styles, /\.form-actions \{[\s\S]*align-items: center;/u);
+  assert.match(styles, /@media \(max-width: 640px\) \{[\s\S]*flex-direction: column;/u);
+});
+
 test("話者名とスタイル名とテキストからOGGファイル名を作る", () => {
   assert.equal(
     context.makeFileName("ずんだもん", "ノーマル", "こんにちは、世界！"),

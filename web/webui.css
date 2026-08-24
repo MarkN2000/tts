@@ -20,44 +20,32 @@ button, select, textarea { font: inherit; }
 .shell {
   width: min(760px, calc(100% - 32px));
   margin: 0 auto;
-  padding: 52px 0 80px;
+  padding: 28px 0 48px;
 }
 
-.page-header { margin-bottom: 28px; }
-
-.eyebrow {
-  margin: 0 0 8px;
-  color: var(--accent);
-  font-size: .75rem;
-  font-weight: 700;
-  letter-spacing: .14em;
-}
-
-h1, h2, p { margin-top: 0; }
-h1 { margin-bottom: 8px; font-size: clamp(2rem, 5vw, 3.3rem); letter-spacing: -.04em; }
-h2 { margin-bottom: 22px; font-size: 1.2rem; }
-.description { margin-bottom: 0; color: var(--muted); }
+h2, p { margin-top: 0; }
+h2 { margin-bottom: 18px; font-size: 1.2rem; }
 
 .status {
-  margin: 0 0 24px;
-  border-radius: 8px;
-  padding: 12px 14px;
-  color: #3b493e;
-  background: #e8eee8;
+  flex: 1;
+  margin: 0;
+  color: var(--muted);
+  font-size: .88rem;
+  text-align: right;
 }
 
 .status:empty { display: none; }
-.status.error { color: var(--error); background: #f7e5e2; }
+.status.error { color: var(--error); }
 
 .panel {
-  padding: 24px;
+  padding: 20px;
   border: 1px solid var(--line);
   border-radius: 14px;
   background: var(--surface);
   box-shadow: 0 12px 35px rgb(38 50 41 / 6%);
 }
 
-.result { margin-top: 24px; }
+.result { margin-top: 16px; }
 
 .form-fields { display: grid; gap: 8px; }
 
@@ -87,7 +75,13 @@ button:focus-visible, select:focus-visible, textarea:focus-visible, a:focus-visi
   outline-offset: 2px;
 }
 
-.form-actions { display: flex; justify-content: flex-end; margin-top: 22px; }
+.form-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+  margin-top: 16px;
+}
 
 .primary {
   border: 0;
@@ -121,7 +115,9 @@ audio { width: 100%; }
 .secondary-link:hover { background: #d7e6da; }
 
 @media (max-width: 640px) {
-  .shell { width: min(100% - 24px, 760px); padding-top: 28px; }
-  .panel { padding: 18px; }
+  .shell { width: min(100% - 24px, 760px); padding-top: 12px; }
+  .panel { padding: 16px; }
+  .form-actions { align-items: stretch; flex-direction: column; }
+  .form-actions .status { text-align: left; }
   .form-actions .primary { width: 100%; }
 }

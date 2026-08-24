@@ -9,16 +9,7 @@
 </head>
 <body>
   <main class="shell">
-    <header class="page-header">
-      <p class="eyebrow">TTS SERVER</p>
-      <h1>音声生成</h1>
-      <p class="description">話者・スタイルを選び、入力したテキストから OGG 音声を生成します。</p>
-    </header>
-
-    <p id="status" class="status" role="status" aria-live="polite">話者一覧を読み込んでいます…</p>
-
-    <section class="panel" aria-labelledby="form-title">
-      <h2 id="form-title">テキストを入力</h2>
+    <section class="panel" aria-label="音声生成">
       <form id="tts-form">
         <div class="form-fields">
           <label for="speaker-select">話者・スタイル</label>
@@ -30,6 +21,7 @@
           <textarea id="text-input" name="text" rows="1" required disabled placeholder="読み上げるテキストを入力してください"></textarea>
         </div>
         <div class="form-actions">
+          <p id="status" class="status" role="status" aria-live="polite">話者一覧を読み込んでいます…</p>
           <button id="generate-button" class="primary" type="submit" disabled>音声を生成</button>
         </div>
       </form>
