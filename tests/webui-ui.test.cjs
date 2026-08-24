@@ -45,10 +45,12 @@ test("画面上部の見出しを置かず、状態を生成ボタンの左へ�
   assert.match(html, /id="result"[^>]+aria-label="生成した音声"/u);
   assert.match(
     html,
-    /class="form-actions">\s*<p id="status"[^>]*>[^<]*<\/p>\s*<button id="generate-button"/u,
+    /class="form-actions">\s*<a class="settings-link" href="\/settings">設定<\/a>\s*<p id="status"[^>]*>[^<]*<\/p>\s*<button id="generate-button"/u,
   );
   assert.match(styles, /\.form-actions \{[\s\S]*align-items: center;/u);
+  assert.match(styles, /\.settings-link \{[\s\S]*margin-right: auto;[\s\S]*font-size: \.82rem;/u);
   assert.match(styles, /@media \(max-width: 640px\) \{[\s\S]*flex-direction: column;/u);
+  assert.match(styles, /\.form-actions \.settings-link \{[^}]*margin-right: 0;/u);
 });
 
 test("話者名とスタイル名とテキストからOGGファイル名を作る", () => {
