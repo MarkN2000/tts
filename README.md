@@ -27,19 +27,14 @@ config.toml
 
 ## API
 
-音声を生成します。`id` は省略でき、存在しないIDも `default_id` に置き換わります。
+音声を生成します。`speaker` は省略でき、存在しないスタイルIDも `default_id` に置き換わります。`text` と `speaker` はURLのクエリパラメータとしてエンコードしてください。
 
 ```console
-curl -X POST http://127.0.0.1:8080/api/v1/tts \
-  -H "Content-Type: application/json" \
-  -d '{"id":"258599616","text":"こんにちは"}'
+curl -X POST "http://127.0.0.1:8080/api/v1/tts?text=%E3%81%93%E3%82%93%E3%81%AB%E3%81%A1%E3%81%AF&speaker=258599616"
 ```
 
-```json
-{
-  "license": "Aivis Common Model License (ACML) 1.0",
-  "url": "https://tts.markn2000.com/audio/7f4a....ogg"
-}
+```text
+https://tts.markn2000.com/audio/7f4a....ogg?license=Aivis+Common+Model+License+%28ACML%29+1.0
 ```
 
 返されたURLへGETすると、`audio/ogg` の音声を取得できます。

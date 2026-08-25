@@ -13,36 +13,27 @@ VOICEVOX Engine または AivisSpeech Engine にテキストを渡して WAV を
 ### 音声生成
 
 ```http
-POST /api/{api_revision}/tts
-Content-Type: application/json
+POST /api/{api_revision}/tts?text={読み上げるテキスト}&speaker={スタイルID}
 ```
 
 例：
 
 ```http
-POST /api/v1/tts
+POST /api/v1/tts?text=%E3%81%93%E3%82%93%E3%81%AB%E3%81%A1%E3%81%AF&speaker=258599616
 ```
 
-```json
-{
-  "id": "258599616",
-  "text": "こんにちは"
-}
-```
-
-- `text` は必須とする。
-- `id` は文字列で、省略可能とする。
+- `text` はクエリパラメータで必須とする。
+- `speaker` はスタイル ID を表す文字列で、省略可能とする。
+- `text` と `speaker` は URL のクエリパラメータとしてパーセントエンコードする。
 - `api_revision` は設定ファイルの値と完全一致するパスだけを有効とし、それ以外は `404 Not Found` とする。
-- `id` が省略されている場合、または Engine から取得した話者一覧に存在しない場合は `default_id` を使用する。
+- `speaker` が省略されている場合、または Engine から取得した話者一覧に存在しない場合は `default_id` を使用する。
 - `default_id` が Engine から取得した話者一覧に存在しない場合は起動エラーとする。
+- リクエスト本文は使用しない。
 
-成功時は、実際に使用した話者のライセンスと音声 URL だけを返す。
+成功時は、実際に使用した話者のライセンスを `license` クエリパラメータに含む音声 URL だけを、`Content-Type: text/plain; charset=utf-8` で返す。ライセンス値はパーセントエンコードする。
 
-```json
-{
-  "license": "Aivis Common Model License (ACML) 1.0",
-  "url": "https://tts.markn2000.com/audio/7f4a....ogg"
-}
+```text
+https://tts.markn2000.com/audio/7f4a....ogg?license=Aivis+Common+Model+License+%28ACML%29+1.0
 ```
 
 ### 音声取得
@@ -103,24 +94,20 @@ GET /api/settings
 `GET /webui` では、起動時に取得した話者・スタイルを選び、入力したテキストから音声を生成する画面を提供する。
 
 - 話者一覧には管理用の `GET /speakers` を使用し、公開用と同じ未加工の JSON を返す。
-- 画面では話者名とスタイル名を表示し、音声生成時の `id` にはスタイル ID を使用する。
+- 画面では話者名とスタイル名を表示し、音声生成時の `speaker` にはスタイル ID を使用する。
 - テキスト入力欄は初期状態を1行とし、入力内容の改行や折り返しに応じて高さを自動調整する。
 - 画面は見出しを置かず入力フォームを先頭に表示する。フォーム左下に設定画面へのリンクを置き、状態メッセージは音声生成ボタンの左側へ表示する。
-- 既定の話者・スタイルが選ばれた場合は `id` を省略し、`default_id` を使用する。
+- 既定の話者・スタイルが選ばれた場合は `speaker` を省略し、`default_id` を使用する。
 - 入力テキストのトリム、Unicode 正規化、その他の自動変換は行わない。
 
 ```http
-POST /api/webui/tts
-Content-Type: application/json
+POST /api/webui/tts?text={読み上げるテキスト}&speaker={スタイルID}
 ```
 
-リクエスト本文は公開用の音声生成 API と同じ形式とする。成功時は、実際に使用した話者のライセンスと、管理画面と同一オリジンの相対音声 URL を返す。
+リクエストと応答の形式は公開用の音声生成 API と同じとする。成功時は、実際に使用した話者のライセンスを `license` クエリパラメータに含む、管理画面と同一オリジンの相対音声 URL だけを返す。
 
-```json
-{
-  "license": "Aivis Common Model License (ACML) 1.0",
-  "url": "/audio/7f4a....ogg"
-}
+```text
+/audio/7f4a....ogg?license=Aivis+Common+Model+License+%28ACML%29+1.0
 ```
 
 - 音声生成、キャッシュ、排他制御は公開用の音声生成 API と共通にする。
@@ -315,7 +302,7 @@ POST /api/update
 - 相対指定の `cache_dir` は、`config.toml` があるディレクトリを基準に解決する。
 - 起動中のファイル変更は反映せず、反映には再起動を必要とする。
 - `api_revision` は `v1`、`v2` のように公開 API のリビジョンを表す値とする。
-- API の破壊的変更時は `api_revision` を変更し、古い API パスは提供しない。
+- API の破壊的変更時は、運用者が `config.toml` の `api_revision` を変更してから再起動し、古い API パスは提供しない。
 - `api_revision` は古い仕様の利用とバージョン番号だけによる誤接続を防ぐための値であり、認証情報としては扱わない。
 - 起動時に、音声内容へ影響する次の設定を前回起動時の値と比較する。
   - TTS Engine の接続先
