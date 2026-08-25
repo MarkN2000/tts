@@ -4,7 +4,7 @@ use axum::{
     body::Body,
     extract::{Query, State},
     response::{IntoResponse, Response},
-    routing::{get, post},
+    routing::get,
     Router,
 };
 
@@ -23,7 +23,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/webui.css", get(styles))
         .route("/webui.js", get(script))
         .route("/speakers", get(get_speakers))
-        .route("/api/webui/tts", post(generate_audio))
+        .route("/api/webui/tts", get(generate_audio).post(generate_audio))
         .route("/audio/{filename}", get(get_audio))
         .with_state(state)
 }

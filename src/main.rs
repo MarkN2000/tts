@@ -18,7 +18,7 @@ use axum::{
         Response, StatusCode,
     },
     response::IntoResponse,
-    routing::{get, post},
+    routing::get,
     Router,
 };
 use serde::Deserialize;
@@ -126,7 +126,7 @@ async fn main() -> Result<()> {
     spawn_cache_cleanup(Arc::clone(&state));
 
     let public_app = Router::new()
-        .route(&api_path, post(generate_audio))
+        .route(&api_path, get(generate_audio).post(generate_audio))
         .route("/speakers", get(get_speakers))
         .route("/audio/{filename}", get(get_audio))
         .layer(DefaultBodyLimit::disable())
