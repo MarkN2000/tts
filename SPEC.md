@@ -20,7 +20,7 @@ POST /api/{api_revision}/tts?text={読み上げるテキスト}&speaker={スタ�
 例：
 
 ```http
-GET /api/v2/tts?text=%E3%81%93%E3%82%93%E3%81%AB%E3%81%A1%E3%81%AF&speaker=258599616
+GET /api/v2/tts?text=%E3%81%93%E3%82%93%E3%81%AB%E3%81%A1%E3%81%AF&speaker=1878365376
 ```
 
 - `text` はクエリパラメータで必須とする。
@@ -34,7 +34,7 @@ GET /api/v2/tts?text=%E3%81%93%E3%82%93%E3%81%AB%E3%81%A1%E3%81%AF&speaker=25859
 成功時は、実際に使用した話者のライセンスを `license` クエリパラメータに含む音声 URL だけを、`Content-Type: text/plain; charset=utf-8` で返す。ライセンス値はパーセントエンコードする。
 
 ```text
-https://tts.markn2000.com/audio/7f4a....ogg?license=Aivis+Common+Model+License+%28ACML%29+1.0
+https://tts.example.com/audio/7f4a....ogg?license=Aivis+Common+Model+License+%28ACML%29+1.0
 ```
 
 ### 音声取得
@@ -82,7 +82,7 @@ GET /api/settings
 
 ```json
 {
-  "public_tts_url": "https://tts.markn2000.com/api/v2/tts"
+  "public_tts_url": "https://tts.example.com/api/v2/tts"
 }
 ```
 
@@ -319,9 +319,9 @@ POST /api/update
 
 ```toml
 listen = "127.0.0.1:8080"
-admin_listen = "192.168.1.10:8081"
-engine_url = "http://192.168.1.11:10101"
-public_base_url = "https://tts.markn2000.com"
+admin_listen = "127.0.0.1:8081"
+engine_url = "http://127.0.0.1:10101"
+public_base_url = "https://tts.example.com"
 api_revision = "v2"
 
 default_id = "1878365376"

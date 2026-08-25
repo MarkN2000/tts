@@ -32,12 +32,12 @@ config.toml
 GETとPOSTのどちらでも同じ結果を返します。
 
 ```console
-curl "http://127.0.0.1:8080/api/v2/tts?text=%E3%81%93%E3%82%93%E3%81%AB%E3%81%A1%E3%81%AF&speaker=258599616"
-curl -X POST "http://127.0.0.1:8080/api/v2/tts?text=%E3%81%93%E3%82%93%E3%81%AB%E3%81%A1%E3%81%AF&speaker=258599616"
+curl "http://127.0.0.1:8080/api/v2/tts?text=%E3%81%93%E3%82%93%E3%81%AB%E3%81%A1%E3%81%AF&speaker=1878365376"
+curl -X POST "http://127.0.0.1:8080/api/v2/tts?text=%E3%81%93%E3%82%93%E3%81%AB%E3%81%A1%E3%81%AF&speaker=1878365376"
 ```
 
 ```text
-https://tts.markn2000.com/audio/7f4a....ogg?license=Aivis+Common+Model+License+%28ACML%29+1.0
+https://tts.example.com/audio/7f4a....ogg?license=Aivis+Common+Model+License+%28ACML%29+1.0
 ```
 
 返されたURLへGETすると、`audio/ogg` の音声を取得できます。
@@ -50,20 +50,20 @@ curl http://127.0.0.1:8080/speakers
 
 ## 音声生成 Web UI
 
-起動後、LAN内のブラウザで次の画面を開くと、話者・スタイルとテキストを選んで音声を生成できます。生成後は保存済みの Ogg を再生し、そのままファイルとしてダウンロードできます。
+起動後、サーバーと同じPCのブラウザで次の画面を開くと、話者・スタイルとテキストを選んで音声を生成できます。生成後は保存済みの Ogg を再生し、そのままファイルとしてダウンロードできます。
 
 ```text
-http://192.168.1.10:8081/webui
+http://127.0.0.1:8081/webui
 ```
 
-URLのIPアドレスとポートは `admin_listen` に合わせてください。Web UI は公開用ポートや Cloudflare Tunnel では提供しません。
+LAN内の別端末から使用する場合は、`admin_listen` をサーバーのプライベートIPアドレスへ変更し、URLもその値に合わせてください。Web UI は公開用ポートや Cloudflare Tunnel では提供しません。
 
 ## 設定画面
 
-起動後、LAN内のブラウザで次の設定画面を開くと、音声生成Web UI・公開API・話者一覧へのリンクを確認できます。同じ画面で、VOICEVOXとAivisSpeechに共通するユーザー辞書の編集と、Linux x86_64版のアップデートも行えます。画面は実行ファイルへ埋め込まれているため、配布ファイルは増えません。
+起動後、サーバーと同じPCのブラウザで次の設定画面を開くと、音声生成Web UI・公開API・話者一覧へのリンクを確認できます。同じ画面で、VOICEVOXとAivisSpeechに共通するユーザー辞書の編集と、Linux x86_64版のアップデートも行えます。画面は実行ファイルへ埋め込まれているため、配布ファイルは増えません。
 
 ```text
-http://192.168.1.10:8081/settings
+http://127.0.0.1:8081/settings
 ```
 
 URLのIPアドレスとポートは `admin_listen` に合わせてください。辞書を変更すると、変更前の辞書で生成された音声キャッシュはすべて削除されます。
@@ -88,7 +88,7 @@ RestartSec=2s
 
 ## Cloudflare Tunnel
 
-Cloudflare Tunnel は `tts.markn2000.com` を公開用の `http://127.0.0.1:8080` だけへ転送します。管理用の8081番ポートはTunnelへ設定しないでください。生成 API のレート制限は Cloudflare 側で `GET /api/*/tts` と `POST /api/*/tts` を対象に設定し、`GET /audio/*` は対象外とします。
+Cloudflare Tunnelを使用する場合は、設定した公開ホスト名を公開用の `http://127.0.0.1:8080` だけへ転送します。管理用の8081番ポートはTunnelへ設定しないでください。生成 API のレート制限は Cloudflare 側で `GET /api/*/tts` と `POST /api/*/tts` を対象に設定し、`GET /audio/*` は対象外とします。
 
 APIの破壊的変更時は、新しい値へ `api_revision` を変更してください。これは認証情報ではありません。
 
