@@ -12,11 +12,12 @@ use std::{collections::HashMap, env, fmt, sync::Arc, time::Duration};
 use anyhow::{Context, Result};
 use axum::{
     body::{Body, Bytes},
-    extract::{DefaultBodyLimit, Path, Query, State},
+    extract::{DefaultBodyLimit, Path, Query, Request, State},
     http::{
-        header::{CONTENT_TYPE, RETRY_AFTER},
+        header::{HeaderName, HeaderValue, CONTENT_TYPE, RETRY_AFTER},
         Response, StatusCode,
     },
+    middleware::{self, Next},
     response::IntoResponse,
     routing::get,
     Router,
@@ -130,8 +131,11 @@ async fn main() -> Result<()> {
         .route("/speakers", get(get_speakers))
         .route("/audio/{filename}", get(get_audio))
         .layer(DefaultBodyLimit::disable())
+        .layer(middleware::from_fn(add_noindex_header))
         .with_state(Arc::clone(&state));
-    let admin_app = admin::router(Arc::clone(&state)).merge(webui::router(state));
+    let admin_app = admin::router(Arc::clone(&state))
+        .merge(webui::router(state))
+        .layer(middleware::from_fn(add_noindex_header));
     let public_listener = TcpListener::bind(&listen)
         .await
         .with_context(|| format!("{listen} で待受を開始できません"))?;
@@ -186,6 +190,18 @@ pub(crate) fn license_query(license: &str) -> String {
 
 pub(crate) fn plain_text_url_response(url: String) -> Response<Body> {
     ([(CONTENT_TYPE, "text/plain; charset=utf-8")], url).into_response()
+}
+
+async fn add_noindex_header(request: Request, next: Next) -> Response<Body> {
+    with_noindex_header(next.run(request).await)
+}
+
+fn with_noindex_header(mut response: Response<Body>) -> Response<Body> {
+    response.headers_mut().insert(
+        HeaderName::from_static("x-robots-tag"),
+        HeaderValue::from_static("noindex"),
+    );
+    response
 }
 
 pub(crate) async fn generate_cached_audio(
@@ -393,11 +409,11 @@ mod tests {
     use std::collections::HashMap;
 
     use axum::{
-        body::to_bytes,
+        body::{to_bytes, Body},
         extract::Query,
         http::{
             header::{CONTENT_TYPE, RETRY_AFTER},
-            StatusCode, Uri,
+            Response, StatusCode, Uri,
         },
         response::IntoResponse,
     };
@@ -405,8 +421,8 @@ mod tests {
 
     use super::{
         is_valid_audio_id, license_query, make_audio_id, plain_text_url_response, public_audio_url,
-        resolve_speaker_id, try_enter_generation_queue, AppError, GenerationQueueFull, TtsRequest,
-        GENERATION_RETRY_AFTER_SECONDS, MAX_GENERATION_REQUESTS,
+        resolve_speaker_id, try_enter_generation_queue, with_noindex_header, AppError,
+        GenerationQueueFull, TtsRequest, GENERATION_RETRY_AFTER_SECONDS, MAX_GENERATION_REQUESTS,
     };
 
     #[test]
@@ -509,5 +525,12 @@ mod tests {
         );
         let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
         assert_eq!(body, url);
+    }
+
+    #[test]
+    fn すべての応答を検索インデックス対象外にする() {
+        let response = with_noindex_header(Response::new(Body::empty()));
+
+        assert_eq!(response.headers()["x-robots-tag"], "noindex");
     }
 }
