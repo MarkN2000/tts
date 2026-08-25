@@ -29,7 +29,10 @@ config.toml
 
 音声を生成します。`speaker` は省略でき、存在しないスタイルIDも `default_id` に置き換わります。`text` と `speaker` はURLのクエリパラメータとしてエンコードしてください。
 
+GETとPOSTのどちらでも同じ結果を返します。
+
 ```console
+curl "http://127.0.0.1:8080/api/v2/tts?text=%E3%81%93%E3%82%93%E3%81%AB%E3%81%A1%E3%81%AF&speaker=258599616"
 curl -X POST "http://127.0.0.1:8080/api/v2/tts?text=%E3%81%93%E3%82%93%E3%81%AB%E3%81%A1%E3%81%AF&speaker=258599616"
 ```
 
@@ -85,7 +88,7 @@ RestartSec=2s
 
 ## Cloudflare Tunnel
 
-Cloudflare Tunnel は `tts.markn2000.com` を公開用の `http://127.0.0.1:8080` だけへ転送します。管理用の8081番ポートはTunnelへ設定しないでください。生成 API のレート制限は Cloudflare 側で `POST /api/*/tts` を対象に設定し、`GET /audio/*` は対象外とします。
+Cloudflare Tunnel は `tts.markn2000.com` を公開用の `http://127.0.0.1:8080` だけへ転送します。管理用の8081番ポートはTunnelへ設定しないでください。生成 API のレート制限は Cloudflare 側で `GET /api/*/tts` と `POST /api/*/tts` を対象に設定し、`GET /audio/*` は対象外とします。
 
 APIの破壊的変更時は、新しい値へ `api_revision` を変更してください。これは認証情報ではありません。
 

@@ -13,13 +13,14 @@ VOICEVOX Engine または AivisSpeech Engine にテキストを渡して WAV を
 ### 音声生成
 
 ```http
+GET /api/{api_revision}/tts?text={読み上げるテキスト}&speaker={スタイルID}
 POST /api/{api_revision}/tts?text={読み上げるテキスト}&speaker={スタイルID}
 ```
 
 例：
 
 ```http
-POST /api/v2/tts?text=%E3%81%93%E3%82%93%E3%81%AB%E3%81%A1%E3%81%AF&speaker=258599616
+GET /api/v2/tts?text=%E3%81%93%E3%82%93%E3%81%AB%E3%81%A1%E3%81%AF&speaker=258599616
 ```
 
 - `text` はクエリパラメータで必須とする。
@@ -28,7 +29,7 @@ POST /api/v2/tts?text=%E3%81%93%E3%82%93%E3%81%AB%E3%81%A1%E3%81%AF&speaker=2585
 - `api_revision` は設定ファイルの値と完全一致するパスだけを有効とし、それ以外は `404 Not Found` とする。
 - `speaker` が省略されている場合、または Engine から取得した話者一覧に存在しない場合は `default_id` を使用する。
 - `default_id` が Engine から取得した話者一覧に存在しない場合は起動エラーとする。
-- リクエスト本文は使用しない。
+- GET と POST は同じ動作とし、POST のリクエスト本文は使用しない。
 
 成功時は、実際に使用した話者のライセンスを `license` クエリパラメータに含む音声 URL だけを、`Content-Type: text/plain; charset=utf-8` で返す。ライセンス値はパーセントエンコードする。
 
@@ -43,7 +44,6 @@ GET /audio/{audio_id}.ogg
 ```
 
 - `Content-Type: audio/ogg` で保存済み音声を返す。
-- 音声生成用の GET API は提供しない。
 
 ### 話者一覧
 
@@ -101,6 +101,7 @@ GET /api/settings
 - 入力テキストのトリム、Unicode 正規化、その他の自動変換は行わない。
 
 ```http
+GET /api/webui/tts?text={読み上げるテキスト}&speaker={スタイルID}
 POST /api/webui/tts?text={読み上げるテキスト}&speaker={スタイルID}
 ```
 
@@ -353,7 +354,7 @@ config.toml
 ## 9. アクセス制限
 
 - 生成 API は認証なしで公開する。
-- `POST /api/*/tts` へのレート制限は Cloudflare 側で行う。
+- `GET /api/*/tts` と `POST /api/*/tts` へのレート制限は Cloudflare 側で行う。
 - 音声取得用の `GET /audio/{audio_id}.ogg` は生成 API のレート制限対象に含めない。
 - URL の `api_revision` はアクセス制限の代替として扱わない。
 - 音声生成 Web UI、Web UI 用の音声生成 API、設定画面、管理 API は `admin_listen` だけで提供し、Cloudflare Tunnel の接続先に含めない。
@@ -363,7 +364,6 @@ config.toml
 
 - リクエストごとの VOICEVOX / AivisSpeech 切り替え
 - アプリ内の認証、API キー、利用者別レート制限
-- 音声生成用 GET API
 - 起動中の設定ファイル再読み込み
 - FFmpeg の同梱
 - ユーザー辞書の検索、一括操作、インポート、エクスポート
