@@ -30,7 +30,7 @@ config.toml
 音声を生成します。`speaker` は省略でき、存在しないスタイルIDも `default_id` に置き換わります。`text` と `speaker` はURLのクエリパラメータとしてエンコードしてください。
 
 ```console
-curl -X POST "http://127.0.0.1:8080/api/v1/tts?text=%E3%81%93%E3%82%93%E3%81%AB%E3%81%A1%E3%81%AF&speaker=258599616"
+curl -X POST "http://127.0.0.1:8080/api/v2/tts?text=%E3%81%93%E3%82%93%E3%81%AB%E3%81%A1%E3%81%AF&speaker=258599616"
 ```
 
 ```text

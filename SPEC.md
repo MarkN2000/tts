@@ -19,7 +19,7 @@ POST /api/{api_revision}/tts?text={読み上げるテキスト}&speaker={スタ�
 例：
 
 ```http
-POST /api/v1/tts?text=%E3%81%93%E3%82%93%E3%81%AB%E3%81%A1%E3%81%AF&speaker=258599616
+POST /api/v2/tts?text=%E3%81%93%E3%82%93%E3%81%AB%E3%81%A1%E3%81%AF&speaker=258599616
 ```
 
 - `text` はクエリパラメータで必須とする。
@@ -82,7 +82,7 @@ GET /api/settings
 
 ```json
 {
-  "public_tts_url": "https://tts.markn2000.com/api/v1/tts"
+  "public_tts_url": "https://tts.markn2000.com/api/v2/tts"
 }
 ```
 
@@ -321,7 +321,7 @@ listen = "127.0.0.1:8080"
 admin_listen = "192.168.1.10:8081"
 engine_url = "http://192.168.1.11:10101"
 public_base_url = "https://tts.markn2000.com"
-api_revision = "v1"
+api_revision = "v2"
 
 default_id = "1878365376"
 
