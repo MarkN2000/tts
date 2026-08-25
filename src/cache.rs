@@ -19,6 +19,12 @@ pub struct AudioCache {
     signature: CacheSignature,
 }
 
+#[derive(Debug, Default, Eq, PartialEq)]
+pub struct CacheUsage {
+    pub file_count: u64,
+    pub used_bytes: u64,
+}
+
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct CacheSignature {
     pub engine_url: String,
@@ -103,6 +109,36 @@ impl AudioCache {
     pub async fn clear(&self) -> Result<()> {
         self.ensure_ready().await?;
         self.clear_audio_files().await
+    }
+
+    pub async fn usage(&self) -> Result<CacheUsage> {
+        let mut entries = match fs::read_dir(&self.directory).await {
+            Ok(entries) => entries,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                return Ok(CacheUsage::default());
+            }
+            Err(error) => return Err(error).context("キャッシュディレクトリを確認できません"),
+        };
+        let mut usage = CacheUsage::default();
+
+        while let Some(entry) = entries.next_entry().await? {
+            let path = entry.path();
+            if !is_audio_file(&path) {
+                continue;
+            }
+            let metadata = match entry.metadata().await {
+                Ok(metadata) => metadata,
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+                Err(error) => return Err(error).context("キャッシュファイルを確認できません"),
+            };
+            if !metadata.is_file() {
+                continue;
+            }
+            usage.file_count = usage.file_count.saturating_add(1);
+            usage.used_bytes = usage.used_bytes.saturating_add(metadata.len());
+        }
+
+        Ok(usage)
     }
 
     async fn cleanup_files(&self, preserved_audio_id: Option<&str>) -> Result<()> {
@@ -253,6 +289,52 @@ mod tests {
         assert!(!cache.audio_path("old").is_file());
         assert!(cache.audio_path("middle").is_file());
         assert!(cache.audio_path("new").is_file());
+        fs::remove_dir_all(directory).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn 使用量にはoggだけを含める() {
+        let (cache, directory) = test_cache(1);
+        cache.prepare().await.unwrap();
+        fs::write(cache.audio_path("one"), vec![0; 100])
+            .await
+            .unwrap();
+        fs::write(cache.audio_path("two"), vec![0; 250])
+            .await
+            .unwrap();
+        fs::write(cache.temporary_path("working"), vec![0; 500])
+            .await
+            .unwrap();
+
+        let usage = cache.usage().await.unwrap();
+
+        assert_eq!(usage.file_count, 2);
+        assert_eq!(usage.used_bytes, 350);
+        fs::remove_dir_all(directory).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn 存在しないキャッシュディレクトリの使用量は0になる() {
+        let (cache, directory) = test_cache(1);
+
+        assert_eq!(cache.usage().await.unwrap(), Default::default());
+        assert!(!directory.exists());
+    }
+
+    #[tokio::test]
+    async fn キャッシュ削除後も状態ファイルを維持する() {
+        let (cache, directory) = test_cache(1);
+        cache.prepare().await.unwrap();
+        let audio = cache.audio_path("audio");
+        let temporary = cache.temporary_path("working");
+        fs::write(&audio, vec![0; 100]).await.unwrap();
+        fs::write(&temporary, vec![0; 100]).await.unwrap();
+
+        cache.clear().await.unwrap();
+
+        assert!(!audio.exists());
+        assert!(!temporary.exists());
+        assert!(directory.join(STATE_FILE).is_file());
         fs::remove_dir_all(directory).await.unwrap();
     }
 

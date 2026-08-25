@@ -9,7 +9,7 @@ const html = fs.readFileSync(path.join(__dirname, "../web/dictionary.html"), "ut
 const source = script.split("\nconst elements = {")[0];
 const context = vm.createContext({});
 vm.runInContext(
-  `${source}\nthis.toKatakana = hiraganaToKatakana; this.splitMoras = splitPronunciationMoras; this.pitchLevels = accentPitchLevels; this.toSlider = accentTypeToSliderValue; this.toAccent = sliderValueToAccentType; this.valueText = accentValueText;`,
+  `${source}\nthis.toKatakana = hiraganaToKatakana; this.splitMoras = splitPronunciationMoras; this.pitchLevels = accentPitchLevels; this.toSlider = accentTypeToSliderValue; this.toAccent = sliderValueToAccentType; this.valueText = accentValueText; this.formatBytes = formatByteSize;`,
   context,
 );
 
@@ -57,4 +57,20 @@ test("設定画面が公開API URLを取得して表示する", () => {
   assert.match(html, /href="\/speakers"/u);
   assert.match(script, /fetch\("\/api\/settings"/u);
   assert.match(script, /settings\.public_tts_url/u);
+});
+
+test("キャッシュの使用状況を読み込み削除できる", () => {
+  assert.match(html, /id="cache-usage"/u);
+  assert.match(html, /id="cache-file-count"/u);
+  assert.match(html, /id="cache-days"/u);
+  assert.match(html, /id="clear-cache-button"/u);
+  assert.match(script, /fetch\("\/api\/cache", \{ cache: "no-store" \}\)/u);
+  assert.match(script, /fetch\("\/api\/cache", \{ method: "DELETE" \}\)/u);
+});
+
+test("キャッシュ容量を読みやすい単位へ変換する", () => {
+  assert.equal(context.formatBytes(0), "0 B");
+  assert.equal(context.formatBytes(1024), "1.0 KB");
+  assert.equal(context.formatBytes(10 * 1024 * 1024), "10 MB");
+  assert.equal(context.formatBytes(1024 * 1024 * 1024), "1.0 GB");
 });

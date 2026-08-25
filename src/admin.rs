@@ -12,6 +12,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::{
+    cache::CacheUsage,
     dictionary::{is_valid_pronunciation, UserDictWordInput},
     engine::UserDictPreviewError,
     updater::ApplyError,
@@ -28,6 +29,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/settings.css", get(styles))
         .route("/settings.js", get(script))
         .route("/api/settings", get(settings_info))
+        .route("/api/cache", get(cache_info).delete(clear_cache))
         .route("/api/user-dict", get(load_dictionary))
         .route("/api/version", get(version_info))
         .route("/api/update", get(check_update).post(apply_update))
@@ -57,6 +59,50 @@ fn build_settings_info(public_base_url: &str, api_revision: &str) -> SettingsInf
     SettingsInfo {
         public_tts_url: format!("{public_base_url}/api/{api_revision}/tts"),
     }
+}
+
+#[derive(Debug, Eq, PartialEq, Serialize)]
+struct CacheInfo {
+    used_bytes: u64,
+    max_bytes: u64,
+    file_count: u64,
+    cache_days: u64,
+}
+
+async fn cache_info(State(state): State<Arc<AppState>>) -> Result<Json<CacheInfo>, AdminError> {
+    let usage = state
+        .cache
+        .usage()
+        .await
+        .map_err(|error| AdminError::internal("キャッシュ情報を取得できません", Some(error)))?;
+    Ok(Json(build_cache_info(
+        usage,
+        state.config.cache_days,
+        state.config.cache_max_mb,
+    )))
+}
+
+fn build_cache_info(usage: CacheUsage, cache_days: u64, cache_max_mb: u64) -> CacheInfo {
+    CacheInfo {
+        used_bytes: usage.used_bytes,
+        max_bytes: cache_max_mb * 1024 * 1024,
+        file_count: usage.file_count,
+        cache_days,
+    }
+}
+
+async fn clear_cache(State(state): State<Arc<AppState>>) -> Result<StatusCode, AdminError> {
+    let _permit = state
+        .generation_lock
+        .acquire()
+        .await
+        .map_err(|_| AdminError::internal("排他制御を開始できません", None))?;
+    state
+        .cache
+        .clear()
+        .await
+        .map_err(|error| AdminError::internal("音声キャッシュを削除できません", Some(error)))?;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 async fn version_info(State(state): State<Arc<AppState>>) -> impl IntoResponse {
@@ -293,7 +339,7 @@ struct ErrorResponse {
 impl IntoResponse for AdminError {
     fn into_response(self) -> axum::response::Response {
         if let Some(source) = self.source {
-            eprintln!("ユーザー辞書エラー: {source:#}");
+            eprintln!("管理APIエラー: {source:#}");
         }
         (
             self.status,
@@ -346,7 +392,9 @@ impl IntoResponse for UpdateApiError {
 
 #[cfg(test)]
 mod tests {
-    use super::build_settings_info;
+    use crate::cache::CacheUsage;
+
+    use super::{build_cache_info, build_settings_info};
 
     #[test]
     fn 設定画面のリンクを実行中の設定から組み立てる() {
@@ -356,5 +404,22 @@ mod tests {
             settings.public_tts_url,
             "https://tts.example.com/api/v2-test/tts"
         );
+    }
+
+    #[test]
+    fn キャッシュ情報に使用量と設定値を含める() {
+        let info = build_cache_info(
+            CacheUsage {
+                used_bytes: 300,
+                file_count: 2,
+            },
+            31,
+            1024,
+        );
+
+        assert_eq!(info.used_bytes, 300);
+        assert_eq!(info.max_bytes, 1024 * 1024 * 1024);
+        assert_eq!(info.file_count, 2);
+        assert_eq!(info.cache_days, 31);
     }
 }

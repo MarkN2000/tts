@@ -51,6 +51,19 @@ function accentValueText(accentType) {
   return accentType === 0 ? "平板" : `アクセント ${accentType}`;
 }
 
+function formatByteSize(bytes) {
+  if (!Number.isFinite(bytes) || bytes < 0) return "—";
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  let value = bytes;
+  let unitIndex = 0;
+  while (value >= 1024 && unitIndex < units.length - 1) {
+    value /= 1024;
+    unitIndex += 1;
+  }
+  const digits = unitIndex === 0 || value >= 10 ? 0 : 1;
+  return `${value.toFixed(digits)} ${units[unitIndex]}`;
+}
+
 const elements = {
   status: document.querySelector("#status"),
   error: document.querySelector("#error"),
@@ -85,6 +98,12 @@ const elements = {
   updateError: document.querySelector("#update-error"),
   publicTtsUrl: document.querySelector("#public-tts-url"),
   linksError: document.querySelector("#links-error"),
+  cacheUsage: document.querySelector("#cache-usage"),
+  cacheFileCount: document.querySelector("#cache-file-count"),
+  cacheDays: document.querySelector("#cache-days"),
+  clearCache: document.querySelector("#clear-cache-button"),
+  cacheStatus: document.querySelector("#cache-status"),
+  cacheError: document.querySelector("#cache-error"),
 };
 
 let words = [];
@@ -110,6 +129,7 @@ elements.accentSlider.addEventListener("input", updateAccentFromSlider);
 elements.priority.addEventListener("input", updatePriorityLabel);
 elements.checkUpdate.addEventListener("click", checkForUpdate);
 elements.applyUpdate.addEventListener("click", applyUpdate);
+elements.clearCache.addEventListener("click", clearCache);
 
 for (const field of elements.form.elements) {
   field.addEventListener("invalid", () => field.setAttribute("aria-invalid", "true"));
@@ -119,6 +139,7 @@ for (const field of elements.form.elements) {
 loadDictionary();
 loadVersionInfo();
 loadSettingsInfo();
+loadCacheInfo();
 
 function setMessage(message = "", isError = false) {
   elements.status.textContent = isError ? "" : message;
@@ -141,6 +162,7 @@ function updateDisabledState() {
   elements.add.disabled = disabled;
   elements.checkUpdate.disabled = disabled;
   elements.applyUpdate.disabled = disabled;
+  elements.clearCache.disabled = disabled;
   for (const button of elements.list.querySelectorAll("button")) button.disabled = disabled;
   for (const field of elements.form.elements) field.disabled = disabled;
 }
@@ -175,6 +197,49 @@ async function loadSettingsInfo() {
   } catch (error) {
     elements.publicTtsUrl.textContent = "取得できませんでした";
     elements.linksError.textContent = error.message || "公開API URLを取得できませんでした。";
+  }
+}
+
+function setCacheMessage(message = "", isError = false) {
+  elements.cacheStatus.textContent = isError ? "" : message;
+  elements.cacheError.textContent = isError ? message : "";
+}
+
+async function loadCacheInfo(successMessage = "") {
+  try {
+    const response = await fetch("/api/cache", { cache: "no-store" });
+    if (!response.ok) throw new Error(await readError(response));
+    const cache = await response.json();
+    const values = [cache.used_bytes, cache.max_bytes, cache.file_count, cache.cache_days];
+    if (!values.every((value) => Number.isSafeInteger(value) && value >= 0)) {
+      throw new Error("キャッシュ情報の応答が不正です。");
+    }
+    elements.cacheUsage.textContent = `${formatByteSize(cache.used_bytes)} / ${formatByteSize(cache.max_bytes)}`;
+    elements.cacheFileCount.textContent = `${cache.file_count}件`;
+    elements.cacheDays.textContent = `${cache.cache_days}日`;
+    setCacheMessage(successMessage);
+  } catch (error) {
+    elements.cacheUsage.textContent = "取得できませんでした";
+    elements.cacheFileCount.textContent = "—";
+    elements.cacheDays.textContent = "—";
+    setCacheMessage(error.message || "キャッシュ情報を取得できませんでした。", true);
+  }
+}
+
+async function clearCache() {
+  if (busy || updateBusy || !confirm("保存済みの音声キャッシュをすべて削除しますか？")) return;
+  setBusy(true);
+  elements.clearCache.textContent = "削除中…";
+  setCacheMessage("音声生成の完了を待ってキャッシュを削除しています…");
+  try {
+    const response = await fetch("/api/cache", { method: "DELETE" });
+    if (!response.ok) throw new Error(await readError(response));
+    await loadCacheInfo("キャッシュを削除しました。");
+  } catch (error) {
+    setCacheMessage(error.message || "キャッシュを削除できませんでした。", true);
+  } finally {
+    elements.clearCache.textContent = "キャッシュを削除";
+    setBusy(false);
   }
 }
 
@@ -545,6 +610,7 @@ async function saveWord(event) {
   if (succeeded) {
     closeEditor();
     await loadDictionary(uuid ? "単語を更新しました。" : "単語を追加しました。");
+    await loadCacheInfo();
   }
 }
 
@@ -565,6 +631,7 @@ async function deleteWord(word) {
   if (succeeded) {
     if (elements.uuid.value === word.uuid) closeEditor();
     await loadDictionary("単語を削除しました。");
+    await loadCacheInfo();
   }
 }
 

@@ -177,6 +177,34 @@ h2, h3 {
   user-select: all;
 }
 
+.cache-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.cache-stat {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  padding: 14px 16px;
+  border: 1px solid #dededb;
+  border-radius: 10px;
+  background: #f8f8f6;
+}
+
+.cache-stat span {
+  color: #686868;
+  font-size: .82rem;
+}
+
+.cache-stat strong {
+  font-size: 1rem;
+  overflow-wrap: anywhere;
+}
+
+.cache-actions { margin-top: 14px; }
+
 .update-actions { margin-top: 14px; }
 
 .word-form {
@@ -390,6 +418,7 @@ label {
   }
 
   .admin-actions button, .form-actions button { flex: 1; }
+  .cache-summary { grid-template-columns: 1fr; }
   .word-card { grid-template-columns: 1fr; }
   .word-actions button { flex: 1; }
 }

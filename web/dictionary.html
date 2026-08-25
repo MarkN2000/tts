@@ -11,7 +11,7 @@
   <main class="admin-card">
     <p class="eyebrow">TTS SERVER</p>
     <h1>設定</h1>
-    <p class="lead">リンクの確認、ユーザー辞書の編集、サーバーのアップデートを行います。</p>
+    <p class="lead">リンクとキャッシュの確認、ユーザー辞書の編集、サーバーのアップデートを行います。</p>
 
     <section class="settings-section" aria-labelledby="links-title">
       <h2 id="links-title">リンク</h2>
@@ -22,7 +22,7 @@
           <span>話者とテキストを選んで音声を生成します。</span>
         </a>
         <div class="link-item">
-          <strong>公開 TTS API（POST）</strong>
+          <strong>公開 TTS API（GET / POST）</strong>
           <code id="public-tts-url" aria-live="polite">読み込み中…</code>
         </div>
         <a class="settings-link" href="/speakers">
@@ -31,6 +31,30 @@
         </a>
       </div>
       <p id="links-error" class="status error" role="alert"></p>
+    </section>
+
+    <section class="settings-section" aria-labelledby="cache-title">
+      <h2 id="cache-title">キャッシュ</h2>
+      <p class="section-description">保存済み音声の使用状況を確認し、必要に応じて削除できます。</p>
+      <div class="cache-summary">
+        <div class="cache-stat">
+          <span>使用量 / 上限</span>
+          <strong id="cache-usage">読み込み中…</strong>
+        </div>
+        <div class="cache-stat">
+          <span>ファイル数</span>
+          <strong id="cache-file-count">—</strong>
+        </div>
+        <div class="cache-stat">
+          <span>保持日数</span>
+          <strong id="cache-days">—</strong>
+        </div>
+      </div>
+      <div class="admin-actions cache-actions">
+        <button id="clear-cache-button" class="secondary-button danger-button" type="button">キャッシュを削除</button>
+      </div>
+      <p id="cache-status" class="status" role="status" aria-live="polite"></p>
+      <p id="cache-error" class="status error" role="alert"></p>
     </section>
 
     <section class="settings-section" aria-labelledby="dictionary-title">
