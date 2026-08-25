@@ -90,6 +90,8 @@ RestartSec=2s
 
 Cloudflare Tunnelを使用する場合は、設定した公開ホスト名を公開用の `http://127.0.0.1:8080` だけへ転送します。管理用の8081番ポートはTunnelへ設定しないでください。生成 API のレート制限は Cloudflare 側で `GET /api/*/tts` と `POST /api/*/tts` を対象に設定し、`GET /audio/*` は対象外とします。
 
+すべてのHTTP応答には `X-Robots-Tag: noindex` を付与し、検索エンジンのインデックス登録を抑制します。これはアクセス制限ではないため、クローラーを含むリクエスト自体は拒否しません。
+
 APIの破壊的変更時は、新しい値へ `api_revision` を変更してください。これは認証情報ではありません。
 
 詳しい動作は [SPEC.md](SPEC.md) を参照してください。
