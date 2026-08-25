@@ -8,9 +8,9 @@ const html = fs.readFileSync(path.join(__dirname, "../web/webui.html"), "utf8");
 const styles = fs.readFileSync(path.join(__dirname, "../web/webui.css"), "utf8");
 const source = fs.readFileSync(path.join(__dirname, "../web/webui.js"), "utf8")
   .split("\nconst elements = {")[0];
-const context = vm.createContext({});
+const context = vm.createContext({ URL, URLSearchParams });
 vm.runInContext(
-  `${source}\nthis.makeFileName = makeDownloadFileName; this.playAudio = playGeneratedAudio; this.resizeTextArea = resizeTextArea;`,
+  `${source}\nthis.makeFileName = makeDownloadFileName; this.playAudio = playGeneratedAudio; this.resizeTextArea = resizeTextArea; this.makeRequestUrl = makeTtsRequestUrl; this.parseResponse = parseTtsResponse;`,
   context,
 );
 
@@ -102,4 +102,30 @@ test("生成した音声を自動再生し、再生拒否は生成エラーに�
   assert.equal(playCount, 1);
   assert.equal(typeof rejectionHandler, "function");
   assert.doesNotThrow(() => rejectionHandler(new Error("自動再生が拒否されました")));
+});
+
+test("Web UIの音声生成もtextとspeakerをクエリで送る", () => {
+  assert.equal(
+    context.makeRequestUrl("こんにちは & おはよう", "258599616"),
+    "/api/webui/tts?text=%E3%81%93%E3%82%93%E3%81%AB%E3%81%A1%E3%81%AF+%26+%E3%81%8A%E3%81%AF%E3%82%88%E3%81%86&speaker=258599616",
+  );
+  assert.equal(
+    context.makeRequestUrl("こんにちは", ""),
+    "/api/webui/tts?text=%E3%81%93%E3%82%93%E3%81%AB%E3%81%A1%E3%81%AF",
+  );
+});
+
+test("プレーンテキストの音声URLからライセンスを取得する", () => {
+  const result = context.parseResponse(
+    "/audio/example.ogg?license=Aivis+Common+Model+License+%28ACML%29+1.0",
+  );
+  assert.equal(result.url, "/audio/example.ogg?license=Aivis+Common+Model+License+%28ACML%29+1.0");
+  assert.equal(result.license, "Aivis Common Model License (ACML) 1.0");
+});
+
+test("ライセンスのない音声URLは不正な応答として拒否する", () => {
+  assert.throws(
+    () => context.parseResponse("/audio/example.ogg"),
+    /音声生成の応答が不正です/u,
+  );
 });

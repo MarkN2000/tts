@@ -1,16 +1,16 @@
 use std::sync::Arc;
 
 use axum::{
-    extract::State,
-    response::IntoResponse,
+    body::Body,
+    extract::{Query, State},
+    response::{IntoResponse, Response},
     routing::{get, post},
-    Json, Router,
+    Router,
 };
-use serde::Serialize;
 
 use crate::{
-    admin::static_response, generate_cached_audio, get_audio, get_speakers, AppError, AppState,
-    TtsRequest,
+    admin::static_response, generate_cached_audio, get_audio, get_speakers, license_query,
+    plain_text_url_response, AppError, AppState, TtsRequest,
 };
 
 const PAGE: &str = include_str!("../web/webui.html");
@@ -40,25 +40,17 @@ async fn script() -> impl IntoResponse {
     static_response("text/javascript; charset=utf-8", SCRIPT)
 }
 
-#[derive(Serialize)]
-struct WebuiTtsResponse {
-    license: String,
-    url: String,
-}
-
 async fn generate_audio(
     State(state): State<Arc<AppState>>,
-    Json(request): Json<TtsRequest>,
-) -> Result<Json<WebuiTtsResponse>, AppError> {
+    Query(request): Query<TtsRequest>,
+) -> Result<Response<Body>, AppError> {
     let generated = generate_cached_audio(&state, request).await?;
-    Ok(Json(WebuiTtsResponse {
-        license: generated.license,
-        url: webui_audio_url(&generated.audio_id),
-    }))
+    let url = webui_audio_url(&generated.audio_id, &generated.license);
+    Ok(plain_text_url_response(url))
 }
 
-fn webui_audio_url(audio_id: &str) -> String {
-    format!("/audio/{audio_id}.ogg")
+fn webui_audio_url(audio_id: &str, license: &str) -> String {
+    format!("/audio/{audio_id}.ogg?{}", license_query(license))
 }
 
 #[cfg(test)]
@@ -67,6 +59,9 @@ mod tests {
 
     #[test]
     fn web_ui音声urlは管理画面と同一オリジンの相対パスにする() {
-        assert_eq!(webui_audio_url("audio-id"), "/audio/audio-id.ogg");
+        assert_eq!(
+            webui_audio_url("audio-id", "CC0"),
+            "/audio/audio-id.ogg?license=CC0"
+        );
     }
 }

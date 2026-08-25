@@ -12,16 +12,16 @@ use std::{collections::HashMap, env, fmt, sync::Arc, time::Duration};
 use anyhow::{Context, Result};
 use axum::{
     body::{Body, Bytes},
-    extract::{DefaultBodyLimit, Path, State},
+    extract::{DefaultBodyLimit, Path, Query, State},
     http::{
         header::{CONTENT_TYPE, RETRY_AFTER},
         Response, StatusCode,
     },
     response::IntoResponse,
     routing::{get, post},
-    Json, Router,
+    Router,
 };
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use sha2::{Digest, Sha256};
 use tokio::{
     fs,
@@ -56,14 +56,8 @@ pub(crate) struct AppState {
 
 #[derive(Deserialize)]
 pub(crate) struct TtsRequest {
-    id: Option<String>,
+    speaker: Option<String>,
     text: String,
-}
-
-#[derive(Serialize)]
-struct TtsResponse {
-    license: String,
-    url: String,
 }
 
 pub(crate) struct GeneratedAudio {
@@ -166,29 +160,44 @@ async fn main() -> Result<()> {
 
 async fn generate_audio(
     State(state): State<Arc<AppState>>,
-    Json(request): Json<TtsRequest>,
-) -> Result<Json<TtsResponse>, AppError> {
+    Query(request): Query<TtsRequest>,
+) -> Result<Response<Body>, AppError> {
     let generated = generate_cached_audio(&state, request).await?;
-    Ok(Json(TtsResponse {
-        license: generated.license,
-        url: public_audio_url(&state.config.public_base_url, &generated.audio_id),
-    }))
+    let url = public_audio_url(
+        &state.config.public_base_url,
+        &generated.audio_id,
+        &generated.license,
+    );
+    Ok(plain_text_url_response(url))
 }
 
-fn public_audio_url(public_base_url: &str, audio_id: &str) -> String {
-    format!("{public_base_url}/audio/{audio_id}.ogg")
+fn public_audio_url(public_base_url: &str, audio_id: &str, license: &str) -> String {
+    format!(
+        "{public_base_url}/audio/{audio_id}.ogg?{}",
+        license_query(license)
+    )
+}
+
+pub(crate) fn license_query(license: &str) -> String {
+    let mut url = reqwest::Url::parse("http://localhost/").expect("固定URLは常に有効");
+    url.query_pairs_mut().append_pair("license", license);
+    url.query().expect("licenseクエリが存在する").to_owned()
+}
+
+pub(crate) fn plain_text_url_response(url: String) -> Response<Body> {
+    ([(CONTENT_TYPE, "text/plain; charset=utf-8")], url).into_response()
 }
 
 pub(crate) async fn generate_cached_audio(
     state: &AppState,
     request: TtsRequest,
 ) -> Result<GeneratedAudio> {
-    let speaker_id = request
-        .id
-        .as_deref()
-        .filter(|id| state.speakers.contains_key(*id))
-        .unwrap_or(&state.config.default_id)
-        .to_owned();
+    let speaker_id = resolve_speaker_id(
+        &state.speakers,
+        &state.config.default_id,
+        request.speaker.as_deref(),
+    )
+    .to_owned();
     let audio_id = make_audio_id(&speaker_id, &request.text);
 
     if state.cache.find(&audio_id).await?.is_none() {
@@ -215,6 +224,16 @@ pub(crate) async fn generate_cached_audio(
         audio_id,
         license: speaker.license.clone(),
     })
+}
+
+fn resolve_speaker_id<'a, T>(
+    speakers: &'a HashMap<String, T>,
+    default_id: &'a str,
+    requested_id: Option<&str>,
+) -> &'a str {
+    requested_id
+        .and_then(|id| speakers.get_key_value(id).map(|(key, _)| key.as_str()))
+        .unwrap_or(default_id)
 }
 
 pub(crate) async fn get_speakers(State(state): State<Arc<AppState>>) -> impl IntoResponse {
@@ -371,15 +390,23 @@ impl IntoResponse for AppError {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
+
     use axum::{
-        http::{header::RETRY_AFTER, StatusCode},
+        body::to_bytes,
+        extract::Query,
+        http::{
+            header::{CONTENT_TYPE, RETRY_AFTER},
+            StatusCode, Uri,
+        },
         response::IntoResponse,
     };
     use tokio::sync::Semaphore;
 
     use super::{
-        is_valid_audio_id, make_audio_id, public_audio_url, try_enter_generation_queue, AppError,
-        GenerationQueueFull, GENERATION_RETRY_AFTER_SECONDS, MAX_GENERATION_REQUESTS,
+        is_valid_audio_id, license_query, make_audio_id, plain_text_url_response, public_audio_url,
+        resolve_speaker_id, try_enter_generation_queue, AppError, GenerationQueueFull, TtsRequest,
+        GENERATION_RETRY_AFTER_SECONDS, MAX_GENERATION_REQUESTS,
     };
 
     #[test]
@@ -432,8 +459,55 @@ mod tests {
     #[test]
     fn 公開音声urlは公開用base_urlを使用する() {
         assert_eq!(
-            public_audio_url("https://tts.example.com", "audio-id"),
-            "https://tts.example.com/audio/audio-id.ogg"
+            public_audio_url("https://tts.example.com", "audio-id", "CC0"),
+            "https://tts.example.com/audio/audio-id.ogg?license=CC0"
         );
+    }
+
+    #[test]
+    fn ライセンスはurlのクエリとしてエンコードする() {
+        assert_eq!(
+            license_query("Aivis Common Model License (ACML) 1.0 & CC0"),
+            "license=Aivis+Common+Model+License+%28ACML%29+1.0+%26+CC0"
+        );
+    }
+
+    #[test]
+    fn 日本語と記号を含むクエリを復元する() {
+        let uri: Uri = "/tts?text=%E3%81%93%E3%82%93%E3%81%AB%E3%81%A1%E3%81%AF+%26+%E3%81%8A%E3%81%AF%E3%82%88%E3%81%86&speaker=3"
+            .parse()
+            .unwrap();
+        let Query(request) = Query::<TtsRequest>::try_from_uri(&uri).unwrap();
+
+        assert_eq!(request.text, "こんにちは & おはよう");
+        assert_eq!(request.speaker.as_deref(), Some("3"));
+    }
+
+    #[test]
+    fn speakerの省略と未知値には既定値を使う() {
+        let speakers = HashMap::from([("3".to_owned(), ()), ("7".to_owned(), ())]);
+
+        assert_eq!(resolve_speaker_id(&speakers, "3", Some("7")), "7");
+        assert_eq!(resolve_speaker_id(&speakers, "3", None), "3");
+        assert_eq!(resolve_speaker_id(&speakers, "3", Some("999")), "3");
+    }
+
+    #[test]
+    fn textのない旧json形式はクエリとして受理しない() {
+        let uri: Uri = "/tts".parse().unwrap();
+        assert!(Query::<TtsRequest>::try_from_uri(&uri).is_err());
+    }
+
+    #[tokio::test]
+    async fn 成功応答はurlだけのプレーンテキストにする() {
+        let url = "https://tts.example.com/audio/example.ogg?license=CC0";
+        let response = plain_text_url_response(url.to_owned());
+
+        assert_eq!(
+            response.headers()[CONTENT_TYPE],
+            "text/plain; charset=utf-8"
+        );
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        assert_eq!(body, url);
     }
 }

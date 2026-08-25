@@ -32,6 +32,19 @@ function resizeTextArea(textarea) {
   textarea.style.height = `${textarea.scrollHeight + borderHeight}px`;
 }
 
+function makeTtsRequestUrl(text, speaker) {
+  const parameters = new URLSearchParams({ text });
+  if (speaker !== "") parameters.set("speaker", speaker);
+  return `/api/webui/tts?${parameters}`;
+}
+
+function parseTtsResponse(responseText) {
+  const url = new URL(responseText, "http://localhost");
+  const license = url.searchParams.get("license");
+  if (!responseText || !license) throw new Error("音声生成の応答が不正です");
+  return { url: responseText, license };
+}
+
 const elements = {
   status: document.querySelector("#status"),
   form: document.querySelector("#tts-form"),
@@ -96,8 +109,7 @@ async function generateAudio(event) {
   if (!elements.form.reportValidity()) return;
 
   const text = elements.text.value;
-  const id = elements.speaker.value;
-  const body = id === "" ? { text } : { text, id };
+  const speaker = elements.speaker.value;
   setGenerating(true);
   setStatus("音声を生成しています…");
   elements.result.hidden = true;
@@ -105,16 +117,11 @@ async function generateAudio(event) {
   elements.audio.load();
 
   try {
-    const response = await fetch("/api/webui/tts", {
+    const response = await fetch(makeTtsRequestUrl(text, speaker), {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
     });
     if (!response.ok) throw new Error(await readError(response));
-    const result = await response.json();
-    if (typeof result.url !== "string" || typeof result.license !== "string") {
-      throw new Error("音声生成の応答が不正です");
-    }
+    const result = parseTtsResponse(await response.text());
     const selected = elements.speaker.selectedOptions[0];
     const fileName = makeDownloadFileName(
       selected?.dataset.speakerName,
