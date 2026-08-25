@@ -120,9 +120,7 @@ mod tests {
 
     #[test]
     fn 管理画面はローカル用アドレスだけを許可する() {
-        assert!(is_private_or_local(IpAddr::V4(
-            "192.168.1.10".parse().unwrap()
-        )));
+        assert!(is_private_or_local(IpAddr::V4("10.0.0.1".parse().unwrap())));
         assert!(is_private_or_local(IpAddr::V4(
             "127.0.0.1".parse().unwrap()
         )));

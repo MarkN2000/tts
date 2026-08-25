@@ -106,8 +106,8 @@ test("生成した音声を自動再生し、再生拒否は生成エラーに�
 
 test("Web UIの音声生成もtextとspeakerをクエリで送る", () => {
   assert.equal(
-    context.makeRequestUrl("こんにちは & おはよう", "258599616"),
-    "/api/webui/tts?text=%E3%81%93%E3%82%93%E3%81%AB%E3%81%A1%E3%81%AF+%26+%E3%81%8A%E3%81%AF%E3%82%88%E3%81%86&speaker=258599616",
+    context.makeRequestUrl("こんにちは & おはよう", "1878365376"),
+    "/api/webui/tts?text=%E3%81%93%E3%82%93%E3%81%AB%E3%81%A1%E3%81%AF+%26+%E3%81%8A%E3%81%AF%E3%82%88%E3%81%86&speaker=1878365376",
   );
   assert.equal(
     context.makeRequestUrl("こんにちは", ""),
