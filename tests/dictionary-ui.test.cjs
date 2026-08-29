@@ -51,12 +51,19 @@ test("アクセントのスライダー値を意味のある文言で表す", ()
   assert.equal(context.valueText(3), "アクセント 3");
 });
 
-test("設定画面が公開API URLを取得して表示する", () => {
-  assert.match(html, /id="public-tts-url"/u);
-  assert.match(html, /href="\/webui"/u);
-  assert.match(html, /href="\/speakers"/u);
+test("設定画面がEngineごとの公開API URLを取得して表示する", () => {
+  assert.match(html, /id="engine-links"/u);
+  assert.match(html, /id="dictionary-engine-select"/u);
   assert.match(script, /fetch\("\/api\/settings"/u);
-  assert.match(script, /settings\.public_tts_url/u);
+  assert.match(script, /settings\.engines/u);
+  assert.match(script, /public_tts_url/u);
+  assert.match(script, /public_speakers_url/u);
+  assert.match(script, /\/webui\?engine=/u);
+});
+
+test("辞書操作は選択したEngine別のAPIを使用する", () => {
+  assert.match(script, /\/api\/engines\/\$\{encodeURIComponent\(selectedEngine\)\}\/user-dict/u);
+  assert.match(script, /elements\.engine\.addEventListener\("change", selectEngine\)/u);
 });
 
 test("キャッシュの使用状況を読み込み削除できる", () => {

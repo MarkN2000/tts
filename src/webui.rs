@@ -2,7 +2,8 @@ use std::sync::Arc;
 
 use axum::{
     body::Body,
-    extract::{Query, State},
+    extract::{Path, Query, State},
+    http::StatusCode,
     response::{IntoResponse, Response},
     routing::get,
     Router,
@@ -22,9 +23,12 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/webui", get(page))
         .route("/webui.css", get(styles))
         .route("/webui.js", get(script))
-        .route("/speakers", get(get_speakers))
-        .route("/api/webui/tts", get(generate_audio).post(generate_audio))
-        .route("/audio/{filename}", get(get_audio))
+        .route("/api/webui/{engine}/speakers", get(get_speakers))
+        .route(
+            "/api/webui/{engine}/tts",
+            get(generate_audio).post(generate_audio),
+        )
+        .route("/audio/{engine}/{filename}", get(get_audio))
         .with_state(state)
 }
 
@@ -42,15 +46,22 @@ async fn script() -> impl IntoResponse {
 
 async fn generate_audio(
     State(state): State<Arc<AppState>>,
+    Path(engine_id): Path<String>,
     Query(request): Query<TtsRequest>,
 ) -> Result<Response<Body>, AppError> {
-    let generated = generate_cached_audio(&state, request).await?;
-    let url = webui_audio_url(&generated.audio_id, &generated.license);
+    if !state.engines.contains_key(&engine_id) {
+        return Ok(StatusCode::NOT_FOUND.into_response());
+    }
+    let generated = generate_cached_audio(&state, &engine_id, request).await?;
+    let url = webui_audio_url(&engine_id, &generated.audio_id, &generated.license);
     Ok(plain_text_url_response(url))
 }
 
-fn webui_audio_url(audio_id: &str, license: &str) -> String {
-    format!("/audio/{audio_id}.ogg?{}", license_query(license))
+fn webui_audio_url(engine_id: &str, audio_id: &str, license: &str) -> String {
+    format!(
+        "/audio/{engine_id}/{audio_id}.ogg?{}",
+        license_query(license)
+    )
 }
 
 #[cfg(test)]
@@ -60,8 +71,8 @@ mod tests {
     #[test]
     fn web_ui音声urlは管理画面と同一オリジンの相対パスにする() {
         assert_eq!(
-            webui_audio_url("audio-id", "CC0"),
-            "/audio/audio-id.ogg?license=CC0"
+            webui_audio_url("aivisspeech", "audio-id", "CC0"),
+            "/audio/aivisspeech/audio-id.ogg?license=CC0"
         );
     }
 }

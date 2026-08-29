@@ -1,4 +1,5 @@
 mod admin;
+mod atomic_file;
 mod cache;
 mod config;
 mod converter;
@@ -32,8 +33,8 @@ use tokio::{
 };
 
 use crate::{
-    cache::{AudioCache, CacheSignature},
-    config::Config,
+    cache::{cleanup_all, prepare_cache_root, AudioCache, CacheSignature},
+    config::{Config, EngineConfig},
     converter::FfmpegConverter,
     engine::{EngineClient, SpeakerMeta},
     updater::UpdateManager,
@@ -44,15 +45,20 @@ const GENERATION_RETRY_AFTER_SECONDS: &str = "10";
 
 pub(crate) struct AppState {
     pub(crate) config: Config,
-    pub(crate) engine: EngineClient,
-    speakers: HashMap<String, SpeakerMeta>,
-    speakers_json: Bytes,
-    pub(crate) cache: AudioCache,
+    pub(crate) engines: HashMap<String, EngineState>,
     converter: FfmpegConverter,
     pub(crate) generation_lock: Semaphore,
     generation_slots: Semaphore,
     pub(crate) updater: UpdateManager,
     pub(crate) shutdown_sender: watch::Sender<bool>,
+}
+
+pub(crate) struct EngineState {
+    pub(crate) config: EngineConfig,
+    pub(crate) engine: EngineClient,
+    speakers: HashMap<String, SpeakerMeta>,
+    speakers_json: Bytes,
+    pub(crate) cache: AudioCache,
 }
 
 #[derive(Deserialize)]
@@ -85,38 +91,67 @@ async fn main() -> Result<()> {
     );
     converter.verify().await?;
 
-    let engine = EngineClient::new(config.engine_url.clone());
-    let speaker_catalog = engine.load_speakers().await?;
-    if !speaker_catalog.speakers.contains_key(&config.default_id) {
-        anyhow::bail!(
-            "default_id {} は Engine の話者一覧に存在しません",
-            config.default_id
+    let mut engines = HashMap::new();
+    for engine_config in &config.engines {
+        let engine = EngineClient::new(engine_config.engine_url.clone());
+        let speaker_catalog = engine
+            .load_speakers()
+            .await
+            .with_context(|| format!("Engine {} の話者一覧を取得できません", engine_config.id))?;
+        if !speaker_catalog
+            .speakers
+            .contains_key(&engine_config.default_id)
+        {
+            anyhow::bail!(
+                "Engine {} の default_id {} は話者一覧に存在しません",
+                engine_config.id,
+                engine_config.default_id
+            );
+        }
+        let cache = AudioCache::new(
+            config.cache_dir.join(&engine_config.id),
+            config.cache_days,
+            CacheSignature {
+                engine_url: engine_config.engine_url.clone(),
+                cache_revision: config.cache_revision,
+                codec: config.codec,
+                bitrate_kbps: config.bitrate_kbps,
+            },
+        );
+        engines.insert(
+            engine_config.id.clone(),
+            EngineState {
+                config: engine_config.clone(),
+                engine,
+                speakers: speaker_catalog.speakers,
+                speakers_json: Bytes::from(speaker_catalog.raw_json),
+                cache,
+            },
         );
     }
+    let engine_ids = config
+        .engines
+        .iter()
+        .map(|engine| engine.id.clone())
+        .collect::<Vec<_>>();
+    prepare_cache_root(&config.cache_dir, &engine_ids).await?;
+    for engine in engines.values() {
+        engine.cache.prepare().await?;
+    }
+    let caches = engines
+        .values()
+        .map(|engine| &engine.cache)
+        .collect::<Vec<_>>();
+    cleanup_all(&caches, config.cache_max_mb * 1024 * 1024, None).await?;
 
-    let cache = AudioCache::new(
-        config.cache_dir.clone(),
-        config.cache_days,
-        config.cache_max_mb,
-        CacheSignature {
-            engine_url: config.engine_url.clone(),
-            cache_revision: config.cache_revision,
-            codec: config.codec,
-            bitrate_kbps: config.bitrate_kbps,
-        },
-    );
-    cache.prepare().await?;
-
-    let api_path = format!("/api/{}/tts", config.api_revision);
+    let api_path = format!("/api/{}/{{engine}}/tts", config.api_revision);
+    let speakers_path = format!("/api/{}/{{engine}}/speakers", config.api_revision);
     let listen = config.listen.clone();
     let admin_address = config.admin_address()?;
     let (shutdown_sender, shutdown_receiver) = watch::channel(false);
     let state = Arc::new(AppState {
         config,
-        engine,
-        speakers: speaker_catalog.speakers,
-        speakers_json: Bytes::from(speaker_catalog.raw_json),
-        cache,
+        engines,
         converter,
         generation_lock: Semaphore::new(1),
         generation_slots: Semaphore::new(MAX_GENERATION_REQUESTS),
@@ -128,8 +163,8 @@ async fn main() -> Result<()> {
 
     let public_app = Router::new()
         .route(&api_path, get(generate_audio).post(generate_audio))
-        .route("/speakers", get(get_speakers))
-        .route("/audio/{filename}", get(get_audio))
+        .route(&speakers_path, get(get_speakers))
+        .route("/audio/{engine}/{filename}", get(get_audio))
         .layer(DefaultBodyLimit::disable())
         .layer(middleware::from_fn(add_noindex_header))
         .with_state(Arc::clone(&state));
@@ -164,20 +199,30 @@ async fn main() -> Result<()> {
 
 async fn generate_audio(
     State(state): State<Arc<AppState>>,
+    Path(engine_id): Path<String>,
     Query(request): Query<TtsRequest>,
 ) -> Result<Response<Body>, AppError> {
-    let generated = generate_cached_audio(&state, request).await?;
+    if !state.engines.contains_key(&engine_id) {
+        return Ok(StatusCode::NOT_FOUND.into_response());
+    }
+    let generated = generate_cached_audio(&state, &engine_id, request).await?;
     let url = public_audio_url(
         &state.config.public_base_url,
+        &engine_id,
         &generated.audio_id,
         &generated.license,
     );
     Ok(plain_text_url_response(url))
 }
 
-fn public_audio_url(public_base_url: &str, audio_id: &str, license: &str) -> String {
+fn public_audio_url(
+    public_base_url: &str,
+    engine_id: &str,
+    audio_id: &str,
+    license: &str,
+) -> String {
     format!(
-        "{public_base_url}/audio/{audio_id}.ogg?{}",
+        "{public_base_url}/audio/{engine_id}/{audio_id}.ogg?{}",
         license_query(license)
     )
 }
@@ -206,17 +251,22 @@ fn with_noindex_header(mut response: Response<Body>) -> Response<Body> {
 
 pub(crate) async fn generate_cached_audio(
     state: &AppState,
+    engine_id: &str,
     request: TtsRequest,
 ) -> Result<GeneratedAudio> {
+    let engine = state
+        .engines
+        .get(engine_id)
+        .with_context(|| format!("未知のEngine IDです: {engine_id}"))?;
     let speaker_id = resolve_speaker_id(
-        &state.speakers,
-        &state.config.default_id,
+        &engine.speakers,
+        &engine.config.default_id,
         request.speaker.as_deref(),
     )
     .to_owned();
-    let audio_id = make_audio_id(&speaker_id, &request.text);
+    let audio_id = make_audio_id(engine_id, &speaker_id, &request.text);
 
-    if state.cache.find(&audio_id).await?.is_none() {
+    if engine.cache.find(&audio_id).await?.is_none() {
         let _request_slot = try_enter_generation_queue(&state.generation_slots)?;
         let _permit = state
             .generation_lock
@@ -224,18 +274,29 @@ pub(crate) async fn generate_cached_audio(
             .await
             .map_err(|_| anyhow::anyhow!("音声生成ロックが閉じられました"))?;
 
-        state.cache.ensure_ready().await?;
-        if state.cache.find(&audio_id).await?.is_none() {
-            let wav = state.engine.synthesize(&speaker_id, &request.text).await?;
+        engine.cache.ensure_ready().await?;
+        if engine.cache.find(&audio_id).await?.is_none() {
+            let wav = engine.engine.synthesize(&speaker_id, &request.text).await?;
             state
                 .converter
-                .convert(&wav, &state.cache, &audio_id)
+                .convert(&wav, &engine.cache, &audio_id)
                 .await?;
-            state.cache.cleanup_after_generation(&audio_id).await?;
+            let preserved_path = engine.cache.audio_path(&audio_id);
+            let caches = state
+                .engines
+                .values()
+                .map(|engine| &engine.cache)
+                .collect::<Vec<_>>();
+            cleanup_all(
+                &caches,
+                state.config.cache_max_mb * 1024 * 1024,
+                Some(&preserved_path),
+            )
+            .await?;
         }
     }
 
-    let speaker = &state.speakers[&speaker_id];
+    let speaker = &engine.speakers[&speaker_id];
     Ok(GeneratedAudio {
         audio_id,
         license: speaker.license.clone(),
@@ -252,17 +313,25 @@ fn resolve_speaker_id<'a, T>(
         .unwrap_or(default_id)
 }
 
-pub(crate) async fn get_speakers(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+pub(crate) async fn get_speakers(
+    State(state): State<Arc<AppState>>,
+    Path(engine_id): Path<String>,
+) -> Response<Body> {
+    let Some(engine) = state.engines.get(&engine_id) else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
     (
         [(CONTENT_TYPE, "application/json")],
-        state.speakers_json.clone(),
+        engine.speakers_json.clone(),
     )
+        .into_response()
 }
 
 pub(crate) async fn get_audio(
     State(state): State<Arc<AppState>>,
-    Path(filename): Path<String>,
+    Path((engine_id, filename)): Path<(String, String)>,
 ) -> Result<Response<Body>, StatusCode> {
+    let engine = state.engines.get(&engine_id).ok_or(StatusCode::NOT_FOUND)?;
     let Some(audio_id) = filename.strip_suffix(".ogg") else {
         return Err(StatusCode::NOT_FOUND);
     };
@@ -270,7 +339,7 @@ pub(crate) async fn get_audio(
         return Err(StatusCode::NOT_FOUND);
     }
 
-    let path = state
+    let path = engine
         .cache
         .find(audio_id)
         .await
@@ -291,8 +360,10 @@ pub(crate) async fn get_audio(
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
 }
 
-fn make_audio_id(speaker_id: &str, text: &str) -> String {
+fn make_audio_id(engine_id: &str, speaker_id: &str, text: &str) -> String {
     let mut hasher = Sha256::new();
+    hasher.update((engine_id.len() as u64).to_be_bytes());
+    hasher.update(engine_id.as_bytes());
     hasher.update((speaker_id.len() as u64).to_be_bytes());
     hasher.update(speaker_id.as_bytes());
     hasher.update(text.as_bytes());
@@ -313,7 +384,14 @@ fn spawn_cache_cleanup(state: Arc<AppState>) {
             let Ok(_permit) = state.generation_lock.acquire().await else {
                 return;
             };
-            if let Err(error) = state.cache.cleanup().await {
+            let caches = state
+                .engines
+                .values()
+                .map(|engine| &engine.cache)
+                .collect::<Vec<_>>();
+            if let Err(error) =
+                cleanup_all(&caches, state.config.cache_max_mb * 1024 * 1024, None).await
+            {
                 eprintln!("期限切れキャッシュの削除に失敗しました: {error:#}");
             }
         }
@@ -428,22 +506,26 @@ mod tests {
     #[test]
     fn 同じ話者とテキストは同じaudio_idになる() {
         assert_eq!(
-            make_audio_id("1", "こんにちは"),
-            make_audio_id("1", "こんにちは")
+            make_audio_id("aivisspeech", "1", "こんにちは"),
+            make_audio_id("aivisspeech", "1", "こんにちは")
         );
         assert_ne!(
-            make_audio_id("1", "こんにちは"),
-            make_audio_id("2", "こんにちは")
+            make_audio_id("aivisspeech", "1", "こんにちは"),
+            make_audio_id("aivisspeech", "2", "こんにちは")
         );
         assert_ne!(
-            make_audio_id("1", "こんにちは"),
-            make_audio_id("1", "こんばんは")
+            make_audio_id("aivisspeech", "1", "こんにちは"),
+            make_audio_id("aivisspeech", "1", "こんばんは")
+        );
+        assert_ne!(
+            make_audio_id("aivisspeech", "1", "こんにちは"),
+            make_audio_id("voicevox", "1", "こんにちは")
         );
     }
 
     #[test]
     fn audio_idは64文字の16進数だけを許可する() {
-        let id = make_audio_id("1", "text");
+        let id = make_audio_id("aivisspeech", "1", "text");
         assert!(is_valid_audio_id(&id));
         assert!(!is_valid_audio_id("../config.toml"));
         assert!(!is_valid_audio_id(&"g".repeat(64)));
@@ -475,8 +557,8 @@ mod tests {
     #[test]
     fn 公開音声urlは公開用base_urlを使用する() {
         assert_eq!(
-            public_audio_url("https://tts.example.com", "audio-id", "CC0"),
-            "https://tts.example.com/audio/audio-id.ogg?license=CC0"
+            public_audio_url("https://tts.example.com", "aivisspeech", "audio-id", "CC0"),
+            "https://tts.example.com/audio/aivisspeech/audio-id.ogg?license=CC0"
         );
     }
 

@@ -96,7 +96,8 @@ const elements = {
   applyUpdate: document.querySelector("#apply-update-button"),
   updateStatus: document.querySelector("#update-status"),
   updateError: document.querySelector("#update-error"),
-  publicTtsUrl: document.querySelector("#public-tts-url"),
+  engine: document.querySelector("#dictionary-engine-select"),
+  engineLinks: document.querySelector("#engine-links"),
   linksError: document.querySelector("#links-error"),
   cacheUsage: document.querySelector("#cache-usage"),
   cacheFileCount: document.querySelector("#cache-file-count"),
@@ -113,6 +114,7 @@ let availableVersion;
 let previewAudio;
 let previewAudioUrl;
 let previewAbortController;
+let selectedEngine = "";
 
 elements.add.addEventListener("click", () => openEditor());
 elements.reload.addEventListener("click", () => loadDictionary("最新の辞書を読み込みました。"));
@@ -130,13 +132,13 @@ elements.priority.addEventListener("input", updatePriorityLabel);
 elements.checkUpdate.addEventListener("click", checkForUpdate);
 elements.applyUpdate.addEventListener("click", applyUpdate);
 elements.clearCache.addEventListener("click", clearCache);
+elements.engine.addEventListener("change", selectEngine);
 
 for (const field of elements.form.elements) {
   field.addEventListener("invalid", () => field.setAttribute("aria-invalid", "true"));
   field.addEventListener("input", () => field.setAttribute("aria-invalid", String(!field.validity.valid)));
 }
 
-loadDictionary();
 loadVersionInfo();
 loadSettingsInfo();
 loadCacheInfo();
@@ -158,13 +160,15 @@ function setUpdateBusy(value) {
 
 function updateDisabledState() {
   const disabled = busy || updateBusy;
-  elements.reload.disabled = disabled;
-  elements.add.disabled = disabled;
+  const dictionaryDisabled = disabled || selectedEngine === "";
+  elements.engine.disabled = dictionaryDisabled;
+  elements.reload.disabled = dictionaryDisabled;
+  elements.add.disabled = dictionaryDisabled;
   elements.checkUpdate.disabled = disabled;
   elements.applyUpdate.disabled = disabled;
   elements.clearCache.disabled = disabled;
   for (const button of elements.list.querySelectorAll("button")) button.disabled = disabled;
-  for (const field of elements.form.elements) field.disabled = disabled;
+  for (const field of elements.form.elements) field.disabled = dictionaryDisabled;
 }
 
 async function loadVersionInfo() {
@@ -189,15 +193,72 @@ async function loadSettingsInfo() {
     const response = await fetch("/api/settings", { cache: "no-store" });
     if (!response.ok) throw new Error("公開API URLを取得できませんでした。");
     const settings = await response.json();
-    if (typeof settings.public_tts_url !== "string" || settings.public_tts_url === "") {
+    if (!Array.isArray(settings.engines) || settings.engines.length === 0 || settings.engines.some((engine) => (
+      !engine || typeof engine.id !== "string" || engine.id === ""
+      || typeof engine.name !== "string" || engine.name === ""
+      || typeof engine.public_tts_url !== "string" || engine.public_tts_url === ""
+      || typeof engine.public_speakers_url !== "string" || engine.public_speakers_url === ""
+    ))) {
       throw new Error("設定情報の応答が不正です。");
     }
-    elements.publicTtsUrl.textContent = settings.public_tts_url;
+    populateEngines(settings.engines);
+    selectedEngine = elements.engine.value;
+    updateDisabledState();
     elements.linksError.textContent = "";
+    await loadDictionary();
   } catch (error) {
-    elements.publicTtsUrl.textContent = "取得できませんでした";
+    elements.engineLinks.textContent = "取得できませんでした";
     elements.linksError.textContent = error.message || "公開API URLを取得できませんでした。";
   }
+}
+
+function populateEngines(engines) {
+  elements.engine.replaceChildren();
+  elements.engineLinks.replaceChildren();
+  for (const engine of engines) {
+    const option = document.createElement("option");
+    option.value = engine.id;
+    option.textContent = engine.name;
+    elements.engine.append(option);
+
+    const group = document.createElement("article");
+    group.className = "engine-link-group";
+    const heading = document.createElement("h3");
+    heading.textContent = engine.name;
+    const webui = document.createElement("a");
+    webui.className = "settings-link";
+    webui.href = `/webui?engine=${encodeURIComponent(engine.id)}`;
+    webui.innerHTML = "<strong>音声生成 Web UI</strong><span>話者とテキストを選んで音声を生成します。</span>";
+    const tts = createPublicLinkItem("公開 TTS API（GET / POST）", engine.public_tts_url);
+    const speakers = createPublicLinkItem("話者一覧 API（GET）", engine.public_speakers_url);
+    group.append(heading, webui, tts, speakers);
+    elements.engineLinks.append(group);
+  }
+}
+
+function createPublicLinkItem(label, url) {
+  const item = document.createElement("div");
+  item.className = "link-item";
+  const title = document.createElement("strong");
+  title.textContent = label;
+  const value = document.createElement("code");
+  value.textContent = url;
+  item.append(title, value);
+  return item;
+}
+
+async function selectEngine() {
+  if (busy || updateBusy) return;
+  selectedEngine = elements.engine.value;
+  closeEditor();
+  releasePreview();
+  words = [];
+  renderWords();
+  await loadDictionary();
+}
+
+function dictionaryApiPath(path = "") {
+  return `/api/engines/${encodeURIComponent(selectedEngine)}/user-dict${path}`;
 }
 
 function setCacheMessage(message = "", isError = false) {
@@ -358,11 +419,12 @@ function delay(milliseconds) {
 }
 
 async function loadDictionary(successMessage = "") {
+  if (!selectedEngine) return;
   setBusy(true);
   elements.reload.textContent = "読み込み中…";
   setMessage("読み込み中です…");
   try {
-    const response = await fetch("/api/user-dict", { cache: "no-store" });
+    const response = await fetch(dictionaryApiPath(), { cache: "no-store" });
     if (!response.ok) throw new Error(await readError(response));
     const dictionary = await response.json();
     words = dictionary.words;
@@ -418,7 +480,7 @@ function renderWords() {
 }
 
 function openEditor(word = null) {
-  if (busy) return;
+  if (busy || !selectedEngine) return;
   releasePreview();
   elements.form.reset();
   elements.uuid.value = word?.uuid ?? "";
@@ -543,7 +605,7 @@ async function previewWord() {
   elements.preview.textContent = "試聴を準備中…";
   setMessage();
   try {
-    const response = await fetch("/api/user-dict/preview", {
+    const response = await fetch(dictionaryApiPath("/preview"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       signal: controller.signal,
@@ -594,7 +656,7 @@ async function saveWord(event) {
   setMessage();
   let succeeded = false;
   try {
-    const response = await fetch(uuid ? `/api/user-dict/words/${encodeURIComponent(uuid)}` : "/api/user-dict/words", {
+    const response = await fetch(uuid ? dictionaryApiPath(`/words/${encodeURIComponent(uuid)}`) : dictionaryApiPath("/words"), {
       method: uuid ? "PUT" : "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(requestWord()),
@@ -620,7 +682,7 @@ async function deleteWord(word) {
   setMessage();
   let succeeded = false;
   try {
-    const response = await fetch(`/api/user-dict/words/${encodeURIComponent(word.uuid)}`, { method: "DELETE" });
+    const response = await fetch(dictionaryApiPath(`/words/${encodeURIComponent(word.uuid)}`), { method: "DELETE" });
     if (!response.ok) throw new Error(await readError(response));
     succeeded = true;
   } catch (error) {

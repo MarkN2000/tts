@@ -106,13 +106,20 @@ test("生成した音声を自動再生し、再生拒否は生成エラーに�
 
 test("Web UIの音声生成もtextとspeakerをクエリで送る", () => {
   assert.equal(
-    context.makeRequestUrl("こんにちは & おはよう", "1878365376"),
-    "/api/webui/tts?text=%E3%81%93%E3%82%93%E3%81%AB%E3%81%A1%E3%81%AF+%26+%E3%81%8A%E3%81%AF%E3%82%88%E3%81%86&speaker=1878365376",
+    context.makeRequestUrl("aivisspeech", "こんにちは & おはよう", "1878365376"),
+    "/api/webui/aivisspeech/tts?text=%E3%81%93%E3%82%93%E3%81%AB%E3%81%A1%E3%81%AF+%26+%E3%81%8A%E3%81%AF%E3%82%88%E3%81%86&speaker=1878365376",
   );
   assert.equal(
-    context.makeRequestUrl("こんにちは", ""),
-    "/api/webui/tts?text=%E3%81%93%E3%82%93%E3%81%AB%E3%81%A1%E3%81%AF",
+    context.makeRequestUrl("voicevox", "こんにちは", ""),
+    "/api/webui/voicevox/tts?text=%E3%81%93%E3%82%93%E3%81%AB%E3%81%A1%E3%81%AF",
   );
+});
+
+test("Web UIはEngineを選び、Engine別の管理APIを使用する", () => {
+  assert.match(html, /id="engine-select"/u);
+  assert.match(fs.readFileSync(path.join(__dirname, "../web/webui.js"), "utf8"), /fetch\(`\/api\/webui\/\$\{encodeURIComponent\(engine\)\}\/speakers`/u);
+  assert.match(fs.readFileSync(path.join(__dirname, "../web/webui.js"), "utf8"), /new URLSearchParams\(window\.location\.search\)\.get\("engine"\)/u);
+  assert.match(fs.readFileSync(path.join(__dirname, "../web/webui.js"), "utf8"), /指定された音声エンジン/u);
 });
 
 test("プレーンテキストの音声URLからライセンスを取得する", () => {

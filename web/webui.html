@@ -12,6 +12,11 @@
     <section class="panel" aria-label="音声生成">
       <form id="tts-form">
         <div class="form-fields">
+          <label for="engine-select">音声エンジン</label>
+          <select id="engine-select" name="engine" disabled>
+            <option value="">読み込み中…</option>
+          </select>
+
           <label for="speaker-select">話者・スタイル</label>
           <select id="speaker-select" name="speaker" disabled>
             <option value="">既定の話者・スタイル</option>
@@ -22,7 +27,7 @@
         </div>
         <div class="form-actions">
           <a class="settings-link" href="/settings">設定</a>
-          <p id="status" class="status" role="status" aria-live="polite">話者一覧を読み込んでいます…</p>
+          <p id="status" class="status" role="status" aria-live="polite">設定を読み込んでいます…</p>
           <button id="generate-button" class="primary" type="submit" disabled>音声を生成</button>
         </div>
       </form>

@@ -16,20 +16,7 @@
     <section class="settings-section" aria-labelledby="links-title">
       <h2 id="links-title">リンク</h2>
       <p class="section-description">音声生成画面と公開APIの接続先です。</p>
-      <div class="link-list">
-        <a class="settings-link" href="/webui">
-          <strong>音声生成 Web UI</strong>
-          <span>話者とテキストを選んで音声を生成します。</span>
-        </a>
-        <div class="link-item">
-          <strong>公開 TTS API（GET / POST）</strong>
-          <code id="public-tts-url" aria-live="polite">読み込み中…</code>
-        </div>
-        <a class="settings-link" href="/speakers">
-          <strong>話者一覧 API（GET）</strong>
-          <span>Engineから取得した話者とスタイルのJSONを表示します。</span>
-        </a>
-      </div>
+      <div id="engine-links" class="link-list" aria-live="polite">読み込み中…</div>
       <p id="links-error" class="status error" role="alert"></p>
     </section>
 
@@ -60,9 +47,13 @@
     <section class="settings-section" aria-labelledby="dictionary-title">
       <h2 id="dictionary-title">ユーザー辞書</h2>
       <p class="section-description">VOICEVOX / AivisSpeech 共通の単語を編集します。</p>
+      <label for="dictionary-engine-select">音声エンジン</label>
+      <select id="dictionary-engine-select" disabled>
+        <option value="">読み込み中…</option>
+      </select>
       <div class="admin-actions">
-        <button id="reload-button" class="secondary-button" type="button">辞書を再読み込み</button>
-        <button id="add-button" type="button">単語を追加</button>
+        <button id="reload-button" class="secondary-button" type="button" disabled>辞書を再読み込み</button>
+        <button id="add-button" type="button" disabled>単語を追加</button>
       </div>
       <p id="status" class="status" role="status" aria-live="polite">読み込み中です…</p>
       <p id="error" class="status error" role="alert"></p>

@@ -143,6 +143,15 @@ h2, h3 {
   gap: 10px;
 }
 
+.engine-link-group {
+  display: grid;
+  gap: 10px;
+}
+
+.engine-link-group h3 {
+  margin: 4px 2px 0;
+}
+
 .settings-link,
 .link-item {
   display: grid;
