@@ -10,6 +10,9 @@ VOICEVOX Engine または AivisSpeech Engine にテキストを渡して WAV を
 
 ## 2. API
 
+- 公開用の音声生成、話者一覧、音声取得では、パス末尾の `/` を取り除いてからルーティングする。末尾 `/` の有無で動作を変えない。
+- 仕様書と応答に含める正規URLは末尾 `/` なしとする。
+
 ### 音声生成
 
 ```http
@@ -26,11 +29,24 @@ GET /api/v2/aivisspeech/tts?text=%E3%81%93%E3%82%93%E3%81%AB%E3%81%A1%E3%81%AF&s
 - `text` はクエリパラメータで必須とする。
 - `speaker` はスタイル ID を表す文字列で、省略可能とする。
 - `text` と `speaker` は URL のクエリパラメータとしてパーセントエンコードする。
-- `api_revision` と `engine` は設定ファイルの値と完全一致するパスだけを有効とし、それ以外は `404 Not Found` とする。
+- v1互換URLを除き、`api_revision` と `engine` は設定ファイルの値と完全一致するパスだけを有効とし、それ以外は `404 Not Found` とする。
 - `engine` は設定した TTS Engine の `id` とする。
 - `speaker` が省略されている場合、または対象 Engine から取得した話者一覧に存在しない場合は、その Engine の `default_id` を使用する。
 - いずれかの Engine の `default_id` が対象 Engine から取得した話者一覧に存在しない場合は起動エラーとする。
 - GET と POST は同じ動作とし、POST のリクエスト本文は使用しない。
+
+#### v1互換の音声生成
+
+```http
+GET /api/v1/tts?text={読み上げるテキスト}&speaker={スタイルID}
+POST /api/v1/tts?text={読み上げるテキスト}&speaker={スタイルID}
+```
+
+- EngineをURLで指定しない旧クライアントとの互換用として、`api_revision` の設定値にかかわらず固定で提供する。
+- 対象Engineは `config.toml` の `engines` 配列の先頭とし、配列の並び替えにより対象も変わる。
+- クエリ、話者の解決、生成数制限、キャッシュ、エラーはEngine指定付きAPIと同じ処理を使用する。
+- 成功時は `/audio/{engine}/{audio_id}.ogg` 形式の正規URLを返す。
+- 旧 `GET /speakers`、旧 `GET /audio/{audio_id}.ogg`、POSTのJSONリクエストおよびJSONレスポンスは互換対象に含めない。
 
 成功時は、実際に使用した話者のライセンスを `license` クエリパラメータに含む音声 URL だけを、`Content-Type: text/plain; charset=utf-8` で返す。ライセンス値はパーセントエンコードする。
 
@@ -388,7 +404,7 @@ POST /api/restart
 - `engines` は1件以上とし、設定順の先頭を管理画面の既定Engineとする。
 - Engine の `id` は小文字英数字とハイフンだけを使用し、重複を許可しない。`name`、`engine_url`、`default_id` は空にできない。
 - `engine_url` は HTTP または HTTPS URL とし、末尾の `/` を除いて正規化する。正規化後の同一URLを複数Engineへ設定することはできない。
-- 同一 API パスの意味や応答形式を破壊的に変更する場合は、運用者が `config.toml` の `api_revision` を変更してから再起動する。今回のEngineセグメント追加は旧パスと異なるパスになるため、旧 `api_revision` を維持し、旧パスは提供しない。
+- 同一 API パスの意味や応答形式を破壊的に変更する場合は、運用者が `config.toml` の `api_revision` を変更してから再起動する。Engineセグメントなしの旧パスは、固定のv1互換URLだけを提供する。
 - `api_revision` は古い仕様の利用とバージョン番号だけによる誤接続を防ぐための値であり、認証情報としては扱わない。
 - 起動時に、音声内容へ影響する次の設定を前回起動時の値と比較する。
   - TTS Engine の接続先
@@ -450,7 +466,7 @@ config.toml
 ## 9. アクセス制限
 
 - 生成 API は認証なしで公開する。
-- `GET /api/*/*/tts` と `POST /api/*/*/tts` へのレート制限は Cloudflare 側で行う。
+- CloudflareのURI Pathをワイルドカード `/api/*` とするレート制限を、公開API全体へ適用する。この範囲には音声生成と話者一覧を含む。
 - 音声取得用の `GET /audio/{engine}/{audio_id}.ogg` は生成 API のレート制限対象に含めない。
 - URL の `api_revision` はアクセス制限の代替として扱わない。
 - 音声生成 Web UI、Web UI 用の音声生成 API、設定画面、管理 API は `admin_listen` だけで提供し、Cloudflare Tunnel の接続先に含めない。

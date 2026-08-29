@@ -33,7 +33,7 @@ config.toml
 
 移行前の設定は `config.toml.pre-engines` にそのまま保存されます。旧形式と `[[engines]]` が混在している場合や、既存バックアップの内容が現在の旧設定と異なる場合は、設定を変更せず起動を中止します。
 
-この変更では公開APIと音声URLのパスが変わり、更新前に発行した音声URLと旧API URLは利用できなくなります。設定画面に表示される新しいURLへ呼び出し元を変更してください。
+この変更では公開APIと音声URLのパスが変わり、更新前に発行した音声URLは利用できなくなります。旧 `/api/v1/tts` だけは互換URLとして利用できますが、それ以外は設定画面に表示される新しいURLへ呼び出し元を変更してください。
 
 ## API
 
@@ -45,6 +45,10 @@ GETとPOSTのどちらでも同じ結果を返します。
 curl "http://127.0.0.1:8080/api/v2/aivisspeech/tts?text=%E3%81%93%E3%82%93%E3%81%AB%E3%81%A1%E3%81%AF&speaker=1878365376"
 curl -X POST "http://127.0.0.1:8080/api/v2/aivisspeech/tts?text=%E3%81%93%E3%82%93%E3%81%AB%E3%81%A1%E3%81%AF&speaker=1878365376"
 ```
+
+Engineを指定しない旧 `/api/v1/tts` は互換URLとして、設定順の先頭Engineで生成します。リクエスト形式は上記と同じクエリ形式で、返却される音声URLはEngine IDを含む新形式です。旧 `/speakers`、旧音声URL、古いJSON形式には対応しません。
+
+公開APIでは末尾の `/` があっても同じパスとして扱います。正規URLは末尾 `/` なしです。
 
 ```text
 https://tts.example.com/audio/aivisspeech/7f4a....ogg?license=Aivis+Common+Model+License+%28ACML%29+1.0
@@ -100,7 +104,7 @@ RestartSec=2s
 
 ## Cloudflare Tunnel
 
-Cloudflare Tunnelを使用する場合は、設定した公開ホスト名を公開用の `http://127.0.0.1:8080` だけへ転送します。管理用の8081番ポートはTunnelへ設定しないでください。生成 API のレート制限は Cloudflare 側で `GET /api/*/*/tts` と `POST /api/*/*/tts` を対象に設定し、`GET /audio/*/*` は対象外とします。
+Cloudflare Tunnelを使用する場合は、設定した公開ホスト名を公開用の `http://127.0.0.1:8080` だけへ転送します。管理用の8081番ポートはTunnelへ設定しないでください。Cloudflareのレート制限は URI Path を `wildcard` `/api/*` として公開API全体へ適用できます。この指定には旧・新の音声生成APIと話者一覧が含まれ、`/audio/*` は含まれません。
 
 すべてのHTTP応答には `X-Robots-Tag: noindex` を付与し、検索エンジンのインデックス登録を抑制します。これはアクセス制限ではないため、クローラーを含むリクエスト自体は拒否しません。
 

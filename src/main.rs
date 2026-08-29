@@ -31,6 +31,8 @@ use tokio::{
     sync::{watch, Mutex, Semaphore, SemaphorePermit},
     time,
 };
+use tower::Layer;
+use tower_http::normalize_path::{NormalizePath, NormalizePathLayer};
 use uuid::Uuid;
 
 use crate::{
@@ -43,6 +45,7 @@ use crate::{
 
 const MAX_GENERATION_REQUESTS: usize = 10;
 const GENERATION_RETRY_AFTER_SECONDS: &str = "10";
+const LEGACY_TTS_PATH: &str = "/api/v1/tts";
 
 pub(crate) struct AppState {
     pub(crate) config: Config,
@@ -114,11 +117,16 @@ async fn main() -> Result<()> {
 
     let public_app = Router::new()
         .route(&api_path, get(generate_audio).post(generate_audio))
+        .route(
+            LEGACY_TTS_PATH,
+            get(generate_legacy_audio).post(generate_legacy_audio),
+        )
         .route(&speakers_path, get(get_speakers))
         .route("/audio/{engine}/{filename}", get(get_audio))
         .layer(DefaultBodyLimit::disable())
         .layer(middleware::from_fn(add_noindex_header))
         .with_state(Arc::clone(&state));
+    let public_app = normalize_public_paths(public_app);
     let admin_app = admin::router(Arc::clone(&state))
         .merge(webui::router(state))
         .layer(middleware::from_fn(add_noindex_header));
@@ -139,13 +147,20 @@ async fn main() -> Result<()> {
     });
 
     tokio::try_join!(
-        axum::serve(public_listener, public_app)
-            .with_graceful_shutdown(wait_for_shutdown(shutdown_receiver.clone())),
+        axum::serve(
+            public_listener,
+            axum::ServiceExt::<Request>::into_make_service(public_app),
+        )
+        .with_graceful_shutdown(wait_for_shutdown(shutdown_receiver.clone())),
         axum::serve(admin_listener, admin_app)
             .with_graceful_shutdown(wait_for_shutdown(shutdown_receiver)),
     )
     .map(|_| ())
     .context("HTTP サーバーが異常終了しました")
+}
+
+fn normalize_public_paths(router: Router) -> NormalizePath<Router> {
+    NormalizePathLayer::trim_trailing_slash().layer(router)
 }
 
 async fn build_runtime(config: &Config) -> Result<(FfmpegConverter, HashMap<String, EngineState>)> {
@@ -230,10 +245,33 @@ async fn generate_audio(
     if !state.engines.contains_key(&engine_id) {
         return Ok(StatusCode::NOT_FOUND.into_response());
     }
-    let generated = generate_cached_audio(&state, &engine_id, request).await?;
+    generate_audio_response(state.as_ref(), &engine_id, request).await
+}
+
+async fn generate_legacy_audio(
+    State(state): State<Arc<AppState>>,
+    Query(request): Query<TtsRequest>,
+) -> Result<Response<Body>, AppError> {
+    let engine_id = legacy_engine_id(&state.config.engines);
+    generate_audio_response(state.as_ref(), engine_id, request).await
+}
+
+fn legacy_engine_id(engines: &[EngineConfig]) -> &str {
+    &engines
+        .first()
+        .expect("設定検証によりEngineは1件以上あります")
+        .id
+}
+
+async fn generate_audio_response(
+    state: &AppState,
+    engine_id: &str,
+    request: TtsRequest,
+) -> Result<Response<Body>, AppError> {
+    let generated = generate_cached_audio(state, engine_id, request).await?;
     let url = public_audio_url(
         &state.config.public_base_url,
-        &engine_id,
+        engine_id,
         &generated.audio_id,
         &generated.license,
     );
@@ -516,16 +554,20 @@ mod tests {
         extract::Query,
         http::{
             header::{CONTENT_TYPE, RETRY_AFTER},
-            Response, StatusCode, Uri,
+            Method, Request, Response, StatusCode, Uri,
         },
         response::IntoResponse,
+        routing::get,
+        Router,
     };
     use tokio::sync::Semaphore;
+    use tower::ServiceExt;
 
     use super::{
-        is_valid_audio_id, license_query, make_audio_id, plain_text_url_response, public_audio_url,
-        resolve_speaker_id, try_enter_generation_queue, with_noindex_header, AppError,
-        GenerationQueueFull, TtsRequest, GENERATION_RETRY_AFTER_SECONDS, MAX_GENERATION_REQUESTS,
+        is_valid_audio_id, legacy_engine_id, license_query, make_audio_id, normalize_public_paths,
+        plain_text_url_response, public_audio_url, resolve_speaker_id, try_enter_generation_queue,
+        with_noindex_header, AppError, EngineConfig, GenerationQueueFull, TtsRequest,
+        GENERATION_RETRY_AFTER_SECONDS, LEGACY_TTS_PATH, MAX_GENERATION_REQUESTS,
     };
 
     #[test]
@@ -546,6 +588,64 @@ mod tests {
             make_audio_id("aivisspeech", "1", "こんにちは"),
             make_audio_id("voicevox", "1", "こんにちは")
         );
+    }
+
+    #[test]
+    fn v1互換urlは設定順先頭のengineを使用する() {
+        let engines = [
+            EngineConfig {
+                id: "aivisspeech".to_owned(),
+                name: "AivisSpeech".to_owned(),
+                engine_url: "http://127.0.0.1:10101".to_owned(),
+                default_id: "1".to_owned(),
+            },
+            EngineConfig {
+                id: "voicevox".to_owned(),
+                name: "VOICEVOX".to_owned(),
+                engine_url: "http://127.0.0.1:50021".to_owned(),
+                default_id: "3".to_owned(),
+            },
+        ];
+
+        assert_eq!(LEGACY_TTS_PATH, "/api/v1/tts");
+        assert_eq!(legacy_engine_id(&engines), "aivisspeech");
+    }
+
+    #[tokio::test]
+    async fn 公開apiは末尾スラッシュを除去してルーティングする() {
+        let app = normalize_public_paths(
+            Router::new()
+                .route(
+                    "/api/v1/{engine}/tts",
+                    get(StatusCode::OK).post(StatusCode::OK),
+                )
+                .route("/api/v1/{engine}/speakers", get(StatusCode::OK))
+                .route("/api/v1/tts", get(StatusCode::OK).post(StatusCode::OK))
+                .route("/audio/{engine}/{filename}", get(StatusCode::OK)),
+        );
+        let requests = [
+            (Method::GET, "/api/v1/voicevox/tts/?text=test"),
+            (Method::POST, "/api/v1/voicevox/tts/?text=test"),
+            (Method::GET, "/api/v1/voicevox/speakers/"),
+            (Method::GET, "/api/v1/tts/?text=test"),
+            (Method::POST, "/api/v1/tts/?text=test"),
+            (Method::GET, "/audio/voicevox/example.ogg/"),
+        ];
+
+        for (method, uri) in requests {
+            let response = app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .method(method)
+                        .uri(uri)
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::OK, "{uri}");
+        }
     }
 
     #[test]
