@@ -46,6 +46,7 @@ use crate::{
 const MAX_GENERATION_REQUESTS: usize = 10;
 const GENERATION_RETRY_AFTER_SECONDS: &str = "10";
 const LEGACY_TTS_PATH: &str = "/api/v1/tts";
+const LEGACY_SPEAKERS_PATH: &str = "/api/v1/speakers";
 
 pub(crate) struct AppState {
     pub(crate) config: Config,
@@ -121,6 +122,7 @@ async fn main() -> Result<()> {
             LEGACY_TTS_PATH,
             get(generate_legacy_audio).post(generate_legacy_audio),
         )
+        .route(LEGACY_SPEAKERS_PATH, get(get_legacy_speakers))
         .route(&speakers_path, get(get_speakers))
         .route("/audio/{engine}/{filename}", get(get_audio))
         .layer(DefaultBodyLimit::disable())
@@ -380,7 +382,16 @@ pub(crate) async fn get_speakers(
     State(state): State<Arc<AppState>>,
     Path(engine_id): Path<String>,
 ) -> Response<Body> {
-    let Some(engine) = state.engines.get(&engine_id) else {
+    speakers_response(state.as_ref(), &engine_id)
+}
+
+async fn get_legacy_speakers(State(state): State<Arc<AppState>>) -> Response<Body> {
+    let engine_id = legacy_engine_id(&state.config.engines);
+    speakers_response(state.as_ref(), engine_id)
+}
+
+fn speakers_response(state: &AppState, engine_id: &str) -> Response<Body> {
+    let Some(engine) = state.engines.get(engine_id) else {
         return StatusCode::NOT_FOUND.into_response();
     };
     (
@@ -567,7 +578,8 @@ mod tests {
         is_valid_audio_id, legacy_engine_id, license_query, make_audio_id, normalize_public_paths,
         plain_text_url_response, public_audio_url, resolve_speaker_id, try_enter_generation_queue,
         with_noindex_header, AppError, EngineConfig, GenerationQueueFull, TtsRequest,
-        GENERATION_RETRY_AFTER_SECONDS, LEGACY_TTS_PATH, MAX_GENERATION_REQUESTS,
+        GENERATION_RETRY_AFTER_SECONDS, LEGACY_SPEAKERS_PATH, LEGACY_TTS_PATH,
+        MAX_GENERATION_REQUESTS,
     };
 
     #[test]
@@ -608,6 +620,7 @@ mod tests {
         ];
 
         assert_eq!(LEGACY_TTS_PATH, "/api/v1/tts");
+        assert_eq!(LEGACY_SPEAKERS_PATH, "/api/v1/speakers");
         assert_eq!(legacy_engine_id(&engines), "aivisspeech");
     }
 
@@ -621,6 +634,7 @@ mod tests {
                 )
                 .route("/api/v1/{engine}/speakers", get(StatusCode::OK))
                 .route("/api/v1/tts", get(StatusCode::OK).post(StatusCode::OK))
+                .route(LEGACY_SPEAKERS_PATH, get(StatusCode::OK))
                 .route("/audio/{engine}/{filename}", get(StatusCode::OK)),
         );
         let requests = [
@@ -629,6 +643,7 @@ mod tests {
             (Method::GET, "/api/v1/voicevox/speakers/"),
             (Method::GET, "/api/v1/tts/?text=test"),
             (Method::POST, "/api/v1/tts/?text=test"),
+            (Method::GET, "/api/v1/speakers/"),
             (Method::GET, "/audio/voicevox/example.ogg/"),
         ];
 
@@ -646,6 +661,30 @@ mod tests {
                 .unwrap();
             assert_eq!(response.status(), StatusCode::OK, "{uri}");
         }
+
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri(LEGACY_SPEAKERS_PATH)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::METHOD_NOT_ALLOWED);
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/speakers")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
     }
 
     #[test]

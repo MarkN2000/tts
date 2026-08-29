@@ -33,7 +33,7 @@ config.toml
 
 移行前の設定は `config.toml.pre-engines` にそのまま保存されます。旧形式と `[[engines]]` が混在している場合や、既存バックアップの内容が現在の旧設定と異なる場合は、設定を変更せず起動を中止します。
 
-この変更では公開APIと音声URLのパスが変わり、更新前に発行した音声URLは利用できなくなります。旧 `/api/v1/tts` だけは互換URLとして利用できますが、それ以外は設定画面に表示される新しいURLへ呼び出し元を変更してください。
+この変更では公開APIと音声URLのパスが変わり、更新前に発行した音声URLは利用できなくなります。Engineを指定しない固定のv1互換URLとして `/api/v1/tts` と `/api/v1/speakers` を利用できますが、それ以外は設定画面に表示される新しいURLへ呼び出し元を変更してください。
 
 ## API
 
@@ -46,7 +46,7 @@ curl "http://127.0.0.1:8080/api/v2/aivisspeech/tts?text=%E3%81%93%E3%82%93%E3%81
 curl -X POST "http://127.0.0.1:8080/api/v2/aivisspeech/tts?text=%E3%81%93%E3%82%93%E3%81%AB%E3%81%A1%E3%81%AF&speaker=1878365376"
 ```
 
-Engineを指定しない旧 `/api/v1/tts` は互換URLとして、設定順の先頭Engineで生成します。リクエスト形式は上記と同じクエリ形式で、返却される音声URLはEngine IDを含む新形式です。旧 `/speakers`、旧音声URL、古いJSON形式には対応しません。
+Engineを指定しない `/api/v1/tts` は互換URLとして、設定順の先頭Engineで生成します。リクエスト形式は上記と同じクエリ形式で、返却される音声URLはEngine IDを含む新形式です。旧音声URLと古いJSON形式には対応しません。
 
 公開APIでは末尾の `/` があっても同じパスとして扱います。正規URLは末尾 `/` なしです。
 
@@ -61,6 +61,8 @@ https://tts.example.com/audio/aivisspeech/7f4a....ogg?license=Aivis+Common+Model
 ```console
 curl http://127.0.0.1:8080/api/v2/aivisspeech/speakers
 ```
+
+Engineを指定しない `GET /api/v1/speakers` は、設定順の先頭Engineの話者一覧を返します。旧 `GET /speakers` は提供しません。
 
 ## 音声生成 Web UI
 

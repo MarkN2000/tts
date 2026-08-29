@@ -72,6 +72,17 @@ GET /api/{api_revision}/{engine}/speakers
 - `Content-Type: application/json` とする。
 - 起動中は同じ内容を返し、更新には仲介サーバーの再起動を必要とする。
 
+#### v1互換の話者一覧
+
+```http
+GET /api/v1/speakers
+```
+
+- `api_revision` の設定値にかかわらず固定で提供する。
+- 対象Engineは `config.toml` の `engines` 配列の先頭とし、配列の並び替えにより対象も変わる。
+- Engine指定付きの話者一覧と同じ未加工のJSONおよび `Content-Type` を返す。
+- `GET /speakers` は提供しない。
+
 ### 検索インデックスの抑制
 
 - 公開用と管理用のすべての HTTP 応答へ `X-Robots-Tag: noindex` を付与する。
