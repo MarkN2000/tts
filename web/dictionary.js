@@ -96,6 +96,10 @@ const elements = {
   applyUpdate: document.querySelector("#apply-update-button"),
   updateStatus: document.querySelector("#update-status"),
   updateError: document.querySelector("#update-error"),
+  restartPanel: document.querySelector("#restart-panel"),
+  restart: document.querySelector("#restart-button"),
+  restartStatus: document.querySelector("#restart-status"),
+  restartError: document.querySelector("#restart-error"),
   engine: document.querySelector("#dictionary-engine-select"),
   engineLinks: document.querySelector("#engine-links"),
   linksError: document.querySelector("#links-error"),
@@ -111,6 +115,7 @@ let words = [];
 let busy = false;
 let updateBusy = false;
 let availableVersion;
+let currentInstanceId = "";
 let previewAudio;
 let previewAudioUrl;
 let previewAbortController;
@@ -131,6 +136,7 @@ elements.accentSlider.addEventListener("input", updateAccentFromSlider);
 elements.priority.addEventListener("input", updatePriorityLabel);
 elements.checkUpdate.addEventListener("click", checkForUpdate);
 elements.applyUpdate.addEventListener("click", applyUpdate);
+elements.restart.addEventListener("click", restartServer);
 elements.clearCache.addEventListener("click", clearCache);
 elements.engine.addEventListener("change", selectEngine);
 
@@ -166,6 +172,7 @@ function updateDisabledState() {
   elements.add.disabled = dictionaryDisabled;
   elements.checkUpdate.disabled = disabled;
   elements.applyUpdate.disabled = disabled;
+  elements.restart.disabled = disabled;
   elements.clearCache.disabled = disabled;
   for (const button of elements.list.querySelectorAll("button")) button.disabled = disabled;
   for (const field of elements.form.elements) field.disabled = dictionaryDisabled;
@@ -176,7 +183,13 @@ async function loadVersionInfo() {
     const response = await fetch("/api/version", { cache: "no-store" });
     if (!response.ok) throw new Error("バージョン情報を取得できませんでした。");
     const version = await response.json();
+    if (typeof version.current_version !== "string" || version.current_version === ""
+      || typeof version.instance_id !== "string" || version.instance_id === "") {
+      throw new Error("バージョン情報の応答が不正です。");
+    }
+    currentInstanceId = version.instance_id;
     elements.currentVersion.textContent = `現在 v${version.current_version}`;
+    elements.restartPanel.hidden = version.restart_supported !== true;
     if (!version.supported) {
       setUpdateMessage("自動アップデートはLinux x86_64版で利用できます。");
       return;
@@ -309,6 +322,74 @@ function setUpdateMessage(message = "", isError = false) {
   elements.updateError.textContent = isError ? message : "";
 }
 
+function setRestartMessage(message = "", isError = false) {
+  elements.restartStatus.textContent = isError ? "" : message;
+  elements.restartError.textContent = isError ? message : "";
+}
+
+async function restartServer() {
+  if (busy || updateBusy || currentInstanceId === "") return;
+  if (!confirm("config.tomlを検証してサーバーを再起動しますか？")) return;
+  const previousInstanceId = currentInstanceId;
+  setUpdateBusy(true);
+  setBusy(true);
+  elements.restart.textContent = "検証中…";
+  setRestartMessage("設定と起動に必要なTTS Engine・FFmpegを確認しています…");
+
+  let response;
+  try {
+    response = await fetch("/api/restart", { method: "POST" });
+  } catch {
+    response = undefined;
+  }
+  if (response && !response.ok) {
+    setRestartMessage(await readError(response), true);
+    finishRestartAttempt();
+    return;
+  }
+
+  elements.restart.textContent = "再起動中…";
+  setRestartMessage("サーバーを再起動しています…");
+  const restarted = await waitForInstance(previousInstanceId, 90_000);
+  if (restarted) {
+    currentInstanceId = restarted.instance_id;
+    elements.currentVersion.textContent = `現在 v${restarted.current_version}`;
+    setRestartMessage("設定を反映して再起動しました。");
+    finishRestartAttempt();
+    await loadSettingsInfo();
+    await loadCacheInfo();
+    return;
+  }
+  setRestartMessage("再起動後のサーバーへ接続できません。systemdの状態と変更後のadmin_listenを確認してください。", true);
+  finishRestartAttempt();
+}
+
+async function waitForInstance(previousInstanceId, timeoutMilliseconds) {
+  const deadline = Date.now() + timeoutMilliseconds;
+  while (Date.now() < deadline) {
+    await delay(2_000);
+    try {
+      const response = await fetch("/api/version", { cache: "no-store" });
+      if (!response.ok) continue;
+      const version = await response.json();
+      if (typeof version.instance_id === "string" && version.instance_id !== ""
+        && version.instance_id !== previousInstanceId
+        && typeof version.current_version === "string" && version.current_version !== "") {
+        return version;
+      }
+    } catch {
+      // 再起動中の接続失敗は想定内。
+    }
+  }
+  return undefined;
+}
+
+function finishRestartAttempt() {
+  elements.restart.textContent = "設定を反映して再起動";
+  setUpdateBusy(false);
+  setBusy(false);
+}
+
 async function checkForUpdate() {
   if (busy || updateBusy) return;
   setUpdateBusy(true);
@@ -350,8 +431,9 @@ async function applyUpdate() {
     response = await fetch("/api/update", { method: "POST" });
   } catch {
     // 応答送信直後に再起動すると通信が切れることがあるため、対象版の起動も確認する。
-    if (await waitForVersion(targetVersion, 20_000)) {
-      showUpdateCompleted(targetVersion);
+    const running = await waitForVersion(targetVersion, 20_000);
+    if (running) {
+      showUpdateCompleted(targetVersion, running.instance_id);
       return;
     }
     setUpdateMessage("アップデートを実行できませんでした。", true);
@@ -376,8 +458,9 @@ async function applyUpdate() {
     return;
   }
   setUpdateMessage("サーバーを再起動しています…");
-  if (await waitForVersion(targetVersion, 90_000)) {
-    showUpdateCompleted(targetVersion);
+  const running = await waitForVersion(targetVersion, 90_000);
+  if (running) {
+    showUpdateCompleted(targetVersion, running.instance_id);
     return;
   }
   setUpdateMessage("再起動後のサーバーへ接続できません。systemdの状態を確認してください。", true);
@@ -392,15 +475,17 @@ async function waitForVersion(targetVersion, timeoutMilliseconds) {
       const response = await fetch("/api/version", { cache: "no-store" });
       if (!response.ok) continue;
       const version = await response.json();
-      if (version.current_version === targetVersion) return true;
+      if (version.current_version === targetVersion
+        && typeof version.instance_id === "string" && version.instance_id !== "") return version;
     } catch {
       // 再起動中の接続失敗は想定内。
     }
   }
-  return false;
+  return undefined;
 }
 
-function showUpdateCompleted(version) {
+function showUpdateCompleted(version, instanceId) {
+  currentInstanceId = instanceId;
   elements.currentVersion.textContent = `現在 v${version}`;
   elements.applyUpdate.hidden = true;
   availableVersion = undefined;

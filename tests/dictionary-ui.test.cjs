@@ -81,3 +81,12 @@ test("キャッシュ容量を読みやすい単位へ変換する", () => {
   assert.equal(context.formatBytes(10 * 1024 * 1024), "10 MB");
   assert.equal(context.formatBytes(1024 * 1024 * 1024), "1.0 GB");
 });
+
+test("Linuxでは設定画面から起動IDの変化を確認して再起動する", () => {
+  assert.match(html, /id="restart-panel"/u);
+  assert.match(html, /id="restart-button"/u);
+  assert.match(script, /version\.restart_supported/u);
+  assert.match(script, /fetch\("\/api\/restart", \{ method: "POST" \}\)/u);
+  assert.match(script, /version\.instance_id !== previousInstanceId/u);
+  assert.match(script, /currentInstanceId = instanceId/u);
+});

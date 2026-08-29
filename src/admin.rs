@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{path::Path as FilePath, sync::Arc};
 
 use anyhow::Error;
 use axum::{
@@ -13,10 +13,11 @@ use uuid::Uuid;
 
 use crate::{
     cache::{clear_all, usage_all, CacheUsage},
+    config::Config,
     dictionary::{is_valid_pronunciation, UserDictWordInput},
     engine::UserDictPreviewError,
     updater::ApplyError,
-    AppState, EngineState,
+    validate_runtime_config, AppState, EngineState,
 };
 
 const PAGE: &str = include_str!("../web/dictionary.html");
@@ -33,6 +34,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/api/engines/{engine}/user-dict", get(load_dictionary))
         .route("/api/version", get(version_info))
         .route("/api/update", get(check_update).post(apply_update))
+        .route("/api/restart", post(restart_server))
         .route(
             "/api/engines/{engine}/user-dict/preview",
             post(preview_word),
@@ -139,7 +141,23 @@ async fn clear_cache(State(state): State<Arc<AppState>>) -> Result<StatusCode, A
 }
 
 async fn version_info(State(state): State<Arc<AppState>>) -> impl IntoResponse {
-    Json(state.updater.version_info())
+    Json(ServerVersionInfo {
+        update: state.updater.version_info(),
+        restart_supported: restart_supported(),
+        instance_id: state.instance_id,
+    })
+}
+
+#[derive(Serialize)]
+struct ServerVersionInfo {
+    #[serde(flatten)]
+    update: crate::updater::VersionInfo,
+    restart_supported: bool,
+    instance_id: Uuid,
+}
+
+const fn restart_supported() -> bool {
+    cfg!(target_os = "linux")
 }
 
 async fn check_update(
@@ -156,6 +174,10 @@ async fn check_update(
 async fn apply_update(
     State(state): State<Arc<AppState>>,
 ) -> Result<impl IntoResponse, UpdateApiError> {
+    let _maintenance = state
+        .maintenance_lock
+        .try_lock()
+        .map_err(|_| UpdateApiError::conflict("アップデートまたは再起動が進行中です"))?;
     let updated = state.updater.apply().await.map_err(|error| match error {
         ApplyError::NoUpdate => UpdateApiError::conflict("利用できるアップデートはありません"),
         ApplyError::Restarting => UpdateApiError::conflict("更新を適用して再起動中です"),
@@ -163,6 +185,30 @@ async fn apply_update(
     })?;
     let _ = state.shutdown_sender.send(true);
     Ok((StatusCode::ACCEPTED, Json(updated)))
+}
+
+async fn restart_server(State(state): State<Arc<AppState>>) -> Result<StatusCode, RestartApiError> {
+    if !restart_supported() {
+        return Err(RestartApiError::unsupported());
+    }
+    let _maintenance = state
+        .maintenance_lock
+        .try_lock()
+        .map_err(|_| RestartApiError::conflict())?;
+    validate_and_request_restart(&state.config_path, &state.shutdown_sender).await?;
+    Ok(StatusCode::ACCEPTED)
+}
+
+async fn validate_and_request_restart(
+    config_path: &FilePath,
+    shutdown_sender: &tokio::sync::watch::Sender<bool>,
+) -> Result<(), RestartApiError> {
+    let config = Config::load(config_path).map_err(RestartApiError::invalid_config)?;
+    validate_runtime_config(&config)
+        .await
+        .map_err(RestartApiError::invalid_config)?;
+    let _ = shutdown_sender.send(true);
+    Ok(())
 }
 
 async fn page() -> impl IntoResponse {
@@ -411,6 +457,36 @@ struct UpdateApiError {
     message: String,
 }
 
+#[derive(Debug)]
+struct RestartApiError {
+    status: StatusCode,
+    message: String,
+}
+
+impl RestartApiError {
+    fn unsupported() -> Self {
+        Self {
+            status: StatusCode::NOT_IMPLEMENTED,
+            message: "設定画面からの再起動はLinuxだけに対応しています".to_owned(),
+        }
+    }
+
+    fn conflict() -> Self {
+        Self {
+            status: StatusCode::CONFLICT,
+            message: "アップデートまたは再起動が進行中です".to_owned(),
+        }
+    }
+
+    fn invalid_config(source: Error) -> Self {
+        eprintln!("再起動前の設定検証エラー: {source:#}");
+        Self {
+            status: StatusCode::BAD_REQUEST,
+            message: format!("設定を反映できません: {source:#}"),
+        }
+    }
+}
+
 impl UpdateApiError {
     fn conflict(message: &'static str) -> Self {
         Self {
@@ -445,12 +521,31 @@ impl IntoResponse for UpdateApiError {
     }
 }
 
+impl IntoResponse for RestartApiError {
+    fn into_response(self) -> axum::response::Response {
+        (
+            self.status,
+            Json(UpdateErrorResponse {
+                error: self.message,
+            }),
+        )
+            .into_response()
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    use std::env;
+
     use crate::cache::CacheUsage;
     use crate::config::EngineConfig;
+    use crate::updater::UpdateManager;
+    use uuid::Uuid;
 
-    use super::{build_cache_info, build_settings_info};
+    use super::{
+        build_cache_info, build_settings_info, restart_supported, validate_and_request_restart,
+        ServerVersionInfo,
+    };
 
     #[test]
     fn 設定画面のリンクを実行中の設定から組み立てる() {
@@ -490,5 +585,38 @@ mod tests {
         assert_eq!(info.max_bytes, 1024 * 1024 * 1024);
         assert_eq!(info.file_count, 2);
         assert_eq!(info.cache_days, 31);
+    }
+
+    #[test]
+    fn バージョン情報に再起動対応と起動idを含める() {
+        let instance_id = Uuid::new_v4();
+        let info = ServerVersionInfo {
+            update: UpdateManager::new(env::current_exe().unwrap())
+                .unwrap()
+                .version_info(),
+            restart_supported: restart_supported(),
+            instance_id,
+        };
+
+        let json = serde_json::to_value(info).unwrap();
+
+        assert_eq!(json["restart_supported"], cfg!(target_os = "linux"));
+        assert_eq!(json["instance_id"], instance_id.to_string());
+        assert!(json["current_version"].is_string());
+        assert!(json["supported"].is_boolean());
+    }
+
+    #[tokio::test]
+    async fn 不正な設定では終了通知を送らない() {
+        let missing_config =
+            env::temp_dir().join(format!("tts-server-missing-config-{}.toml", Uuid::new_v4()));
+        let (shutdown_sender, shutdown_receiver) = tokio::sync::watch::channel(false);
+
+        let error = validate_and_request_restart(&missing_config, &shutdown_sender)
+            .await
+            .unwrap_err();
+
+        assert_eq!(error.status, axum::http::StatusCode::BAD_REQUEST);
+        assert!(!*shutdown_receiver.borrow());
     }
 }

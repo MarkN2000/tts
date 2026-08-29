@@ -111,6 +111,7 @@ impl Config {
         reqwest::Url::parse(&self.public_base_url)
             .context("public_base_url がURLとして不正です")?;
         self.validate_engines()?;
+        self.public_address()?;
         self.admin_address()?;
 
         Ok(())
@@ -123,6 +124,17 @@ impl Config {
             .context("admin_listen がIPアドレスとポートとして不正です")?;
         if address.port() == 0 || !is_private_or_local(address.ip()) {
             bail!("admin_listen はプライベートまたはループバックのIPアドレスで指定してください");
+        }
+        Ok(address)
+    }
+
+    pub fn public_address(&self) -> Result<SocketAddr> {
+        let address: SocketAddr = self
+            .listen
+            .parse()
+            .context("listen がIPアドレスとポートとして不正です")?;
+        if address.port() == 0 {
+            bail!("listen のポート番号は1以上にしてください");
         }
         Ok(address)
     }
@@ -499,6 +511,27 @@ default_id = "1878365376"
         assert!(is_private_or_local(IpAddr::V6("fd00::1".parse().unwrap())));
         assert!(!is_private_or_local(IpAddr::V4("0.0.0.0".parse().unwrap())));
         assert!(!is_private_or_local(IpAddr::V4("8.8.8.8".parse().unwrap())));
+    }
+
+    #[test]
+    fn 公開待受はipアドレスと有効なポートだけを許可する() {
+        let mut config = config(vec![engine("aivisspeech", "http://127.0.0.1:10101")]);
+        config.listen = "not-an-address".to_owned();
+        assert!(config
+            .validate()
+            .unwrap_err()
+            .to_string()
+            .contains("listen"));
+
+        config.listen = "127.0.0.1:0".to_owned();
+        assert!(config
+            .validate()
+            .unwrap_err()
+            .to_string()
+            .contains("ポート番号"));
+
+        config.listen = "0.0.0.0:8080".to_owned();
+        assert!(config.validate().is_ok());
     }
 
     #[test]

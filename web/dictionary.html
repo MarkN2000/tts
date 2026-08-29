@@ -118,6 +118,16 @@
       <div id="word-list" class="word-list" aria-labelledby="list-title" aria-live="polite"></div>
     </section>
 
+    <section id="restart-panel" class="settings-section" aria-labelledby="restart-title" hidden>
+      <h2 id="restart-title">再起動</h2>
+      <p class="section-description">config.tomlを検証し、設定を反映するためサーバーを再起動します。systemdのRestart=alwaysが必要です。</p>
+      <div class="admin-actions">
+        <button id="restart-button" type="button">設定を反映して再起動</button>
+      </div>
+      <p id="restart-status" class="status" role="status" aria-live="polite"></p>
+      <p id="restart-error" class="status error" role="alert"></p>
+    </section>
+
     <section id="update-panel" class="settings-section" aria-labelledby="update-title">
       <div class="list-heading">
         <h2 id="update-title">アップデート</h2>

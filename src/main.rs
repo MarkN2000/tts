@@ -8,7 +8,7 @@ mod engine;
 mod updater;
 mod webui;
 
-use std::{collections::HashMap, env, fmt, sync::Arc, time::Duration};
+use std::{collections::HashMap, env, fmt, path::PathBuf, sync::Arc, time::Duration};
 
 use anyhow::{Context, Result};
 use axum::{
@@ -28,9 +28,10 @@ use sha2::{Digest, Sha256};
 use tokio::{
     fs,
     net::TcpListener,
-    sync::{watch, Semaphore, SemaphorePermit},
+    sync::{watch, Mutex, Semaphore, SemaphorePermit},
     time,
 };
+use uuid::Uuid;
 
 use crate::{
     cache::{cleanup_all, prepare_cache_root, AudioCache, CacheSignature},
@@ -45,12 +46,15 @@ const GENERATION_RETRY_AFTER_SECONDS: &str = "10";
 
 pub(crate) struct AppState {
     pub(crate) config: Config,
+    pub(crate) config_path: PathBuf,
     pub(crate) engines: HashMap<String, EngineState>,
     converter: FfmpegConverter,
     pub(crate) generation_lock: Semaphore,
     generation_slots: Semaphore,
     pub(crate) updater: UpdateManager,
     pub(crate) shutdown_sender: watch::Sender<bool>,
+    pub(crate) maintenance_lock: Mutex<()>,
+    pub(crate) instance_id: Uuid,
 }
 
 pub(crate) struct EngineState {
@@ -83,7 +87,68 @@ async fn main() -> Result<()> {
     let executable_directory = executable
         .parent()
         .context("実行ファイルのディレクトリを取得できません")?;
-    let config = Config::load(&executable_directory.join("config.toml"))?;
+    let config_path = executable_directory.join("config.toml");
+    let config = Config::load(&config_path)?;
+    let (converter, engines) = build_runtime(&config).await?;
+    prepare_runtime_cache(&config, &engines).await?;
+
+    let api_path = format!("/api/{}/{{engine}}/tts", config.api_revision);
+    let speakers_path = format!("/api/{}/{{engine}}/speakers", config.api_revision);
+    let listen = config.public_address()?;
+    let admin_address = config.admin_address()?;
+    let (shutdown_sender, shutdown_receiver) = watch::channel(false);
+    let state = Arc::new(AppState {
+        config,
+        config_path,
+        engines,
+        converter,
+        generation_lock: Semaphore::new(1),
+        generation_slots: Semaphore::new(MAX_GENERATION_REQUESTS),
+        updater: UpdateManager::new(executable)?,
+        shutdown_sender: shutdown_sender.clone(),
+        maintenance_lock: Mutex::new(()),
+        instance_id: Uuid::new_v4(),
+    });
+
+    spawn_cache_cleanup(Arc::clone(&state));
+
+    let public_app = Router::new()
+        .route(&api_path, get(generate_audio).post(generate_audio))
+        .route(&speakers_path, get(get_speakers))
+        .route("/audio/{engine}/{filename}", get(get_audio))
+        .layer(DefaultBodyLimit::disable())
+        .layer(middleware::from_fn(add_noindex_header))
+        .with_state(Arc::clone(&state));
+    let admin_app = admin::router(Arc::clone(&state))
+        .merge(webui::router(state))
+        .layer(middleware::from_fn(add_noindex_header));
+    let public_listener = TcpListener::bind(&listen)
+        .await
+        .with_context(|| format!("{listen} で待受を開始できません"))?;
+    let admin_listener = TcpListener::bind(admin_address)
+        .await
+        .with_context(|| format!("{admin_address} で管理画面の待受を開始できません"))?;
+
+    println!("TTS サーバーを http://{listen}{api_path} で開始しました");
+    println!("音声生成 Web UI を http://{admin_address}/webui で開始しました");
+    println!("設定画面を http://{admin_address}/settings で開始しました");
+
+    tokio::spawn(async move {
+        shutdown_signal().await;
+        let _ = shutdown_sender.send(true);
+    });
+
+    tokio::try_join!(
+        axum::serve(public_listener, public_app)
+            .with_graceful_shutdown(wait_for_shutdown(shutdown_receiver.clone())),
+        axum::serve(admin_listener, admin_app)
+            .with_graceful_shutdown(wait_for_shutdown(shutdown_receiver)),
+    )
+    .map(|_| ())
+    .context("HTTP サーバーが異常終了しました")
+}
+
+async fn build_runtime(config: &Config) -> Result<(FfmpegConverter, HashMap<String, EngineState>)> {
     let converter = FfmpegConverter::new(
         config.ffmpeg_path.clone(),
         config.codec,
@@ -129,6 +194,17 @@ async fn main() -> Result<()> {
             },
         );
     }
+    Ok((converter, engines))
+}
+
+pub(crate) async fn validate_runtime_config(config: &Config) -> Result<()> {
+    build_runtime(config).await.map(|_| ())
+}
+
+async fn prepare_runtime_cache(
+    config: &Config,
+    engines: &HashMap<String, EngineState>,
+) -> Result<()> {
     let engine_ids = config
         .engines
         .iter()
@@ -143,58 +219,7 @@ async fn main() -> Result<()> {
         .map(|engine| &engine.cache)
         .collect::<Vec<_>>();
     cleanup_all(&caches, config.cache_max_mb * 1024 * 1024, None).await?;
-
-    let api_path = format!("/api/{}/{{engine}}/tts", config.api_revision);
-    let speakers_path = format!("/api/{}/{{engine}}/speakers", config.api_revision);
-    let listen = config.listen.clone();
-    let admin_address = config.admin_address()?;
-    let (shutdown_sender, shutdown_receiver) = watch::channel(false);
-    let state = Arc::new(AppState {
-        config,
-        engines,
-        converter,
-        generation_lock: Semaphore::new(1),
-        generation_slots: Semaphore::new(MAX_GENERATION_REQUESTS),
-        updater: UpdateManager::new(executable)?,
-        shutdown_sender: shutdown_sender.clone(),
-    });
-
-    spawn_cache_cleanup(Arc::clone(&state));
-
-    let public_app = Router::new()
-        .route(&api_path, get(generate_audio).post(generate_audio))
-        .route(&speakers_path, get(get_speakers))
-        .route("/audio/{engine}/{filename}", get(get_audio))
-        .layer(DefaultBodyLimit::disable())
-        .layer(middleware::from_fn(add_noindex_header))
-        .with_state(Arc::clone(&state));
-    let admin_app = admin::router(Arc::clone(&state))
-        .merge(webui::router(state))
-        .layer(middleware::from_fn(add_noindex_header));
-    let public_listener = TcpListener::bind(&listen)
-        .await
-        .with_context(|| format!("{listen} で待受を開始できません"))?;
-    let admin_listener = TcpListener::bind(admin_address)
-        .await
-        .with_context(|| format!("{admin_address} で管理画面の待受を開始できません"))?;
-
-    println!("TTS サーバーを http://{listen}{api_path} で開始しました");
-    println!("音声生成 Web UI を http://{admin_address}/webui で開始しました");
-    println!("設定画面を http://{admin_address}/settings で開始しました");
-
-    tokio::spawn(async move {
-        shutdown_signal().await;
-        let _ = shutdown_sender.send(true);
-    });
-
-    tokio::try_join!(
-        axum::serve(public_listener, public_app)
-            .with_graceful_shutdown(wait_for_shutdown(shutdown_receiver.clone())),
-        axum::serve(admin_listener, admin_app)
-            .with_graceful_shutdown(wait_for_shutdown(shutdown_receiver)),
-    )
-    .map(|_| ())
-    .context("HTTP サーバーが異常終了しました")
+    Ok(())
 }
 
 async fn generate_audio(

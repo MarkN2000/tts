@@ -79,7 +79,7 @@ GET /settings
 
 #### 設定画面
 
-`GET /settings` では、リンク、キャッシュ、ユーザー辞書、アップデートを同じ画面に表示する。旧 `GET /dictionary` は提供しない。
+`GET /settings` では、リンク、キャッシュ、ユーザー辞書、再起動、アップデートを同じ画面に表示する。旧 `GET /dictionary` は提供しない。
 
 ```http
 GET /api/settings
@@ -289,7 +289,16 @@ GET /api/update
 GET /api/version
 ```
 
-- GitHubへ接続せず、実行中のバージョンと自己更新対応の有無を返す。更新後の再接続確認に使用する。
+- GitHubへ接続せず、実行中のバージョン、自己更新・再起動対応の有無、プロセスごとに異なる `instance_id` を返す。更新後および再起動後の再接続確認に使用する。
+
+```json
+{
+  "supported": true,
+  "current_version": "0.5.0",
+  "restart_supported": true,
+  "instance_id": "8a59cc86-e134-4422-b008-017bf1ce6c62"
+}
+```
 
 ```http
 POST /api/update
@@ -305,6 +314,22 @@ POST /api/update
 - ダウンロード、検証、保存、置換に失敗した場合はサーバーを終了せず、現在の実行ファイルを使用し続ける。
 - 新しい実行ファイルが起動できない場合の自動復旧は行わない。設定形式が移行されている場合は、保存した `tts-server.previous` と `config.toml.pre-engines` を管理者がセットで戻す。
 - 更新確認と更新実行は辞書管理 API と同じく `admin_listen` だけで提供する。
+
+#### Linux 再起動
+
+設定画面では、Linuxで動作している場合に限り、ディスク上の `config.toml` を反映するためサーバーを再起動できる。
+
+```http
+POST /api/restart
+```
+
+- 再起動前に `config.toml` を読み直し、TOMLの構文と設定値、FFmpeg、各TTS Engineの話者一覧と `default_id` を通常起動と同じ条件で検証する。不正な場合は `400 Bad Request` を返し、現在のサーバーを終了しない。
+- キャッシュディレクトリの準備と変更後の待受ポートの確保は事前検証に含めず、再起動後の通常の起動処理で行う。
+- 検証成功時は `202 Accepted` を返してサーバーを正常終了する。実行ファイル自身から新しいプロセスは起動せず、systemdの `Restart=always` により再起動する。
+- Linux以外では `501 Not Implemented` を返し、設定画面に再起動ボタンを表示しない。
+- 設定画面は、再起動前と異なる `instance_id` が `GET /api/version` から返るまで待ち、完了を表示する。
+- `admin_listen` を変更した場合は元の設定画面へ再接続できないため、運用者が変更後のアドレスを開く。
+- 再起動APIは辞書管理APIと同じく `admin_listen` だけで提供する。
 
 ## 3. 音声生成
 
@@ -359,6 +384,7 @@ POST /api/update
 - 移行内容を新形式として検証してから、一時ファイルの同期と原子的な置換で `config.toml` を更新する。失敗時は元の設定を維持する。
 - 移行前の設定は元のバイト列のまま `config.toml.pre-engines` へ1世代保存し、ロールバックに使用できるようにする。既に同名のバックアップがあり現在の旧設定と一致する場合は中断された移行の再試行として再利用し、内容が異なる場合は上書きせず、設定を変更しないで起動エラーとする。通常の新形式読み込みでは設定を書き換えない。
 - `api_revision` は `v1`、`v2` のように公開 API のリビジョンを表す値とする。
+- `listen` はポート番号が1以上のIPアドレスとポートで指定する。公開範囲に関するIPアドレスの制限は設けない。
 - `engines` は1件以上とし、設定順の先頭を管理画面の既定Engineとする。
 - Engine の `id` は小文字英数字とハイフンだけを使用し、重複を許可しない。`name`、`engine_url`、`default_id` は空にできない。
 - `engine_url` は HTTP または HTTPS URL とし、末尾の `/` を除いて正規化する。正規化後の同一URLを複数Engineへ設定することはできない。
@@ -428,7 +454,7 @@ config.toml
 - 音声取得用の `GET /audio/{engine}/{audio_id}.ogg` は生成 API のレート制限対象に含めない。
 - URL の `api_revision` はアクセス制限の代替として扱わない。
 - 音声生成 Web UI、Web UI 用の音声生成 API、設定画面、管理 API は `admin_listen` だけで提供し、Cloudflare Tunnel の接続先に含めない。
-- LAN 内の利用者は音声を生成し、辞書を変更し、Linux ではサーバーを最新版へ更新して再起動できるため、信頼できるネットワークでだけ使用する。
+- LAN 内の利用者は音声を生成し、辞書を変更し、Linux ではサーバーを再起動または最新版へ更新できるため、信頼できるネットワークでだけ使用する。
 
 ## 10. 初版の対象外
 
