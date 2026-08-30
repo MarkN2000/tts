@@ -45,8 +45,6 @@ use crate::{
 
 const MAX_GENERATION_REQUESTS: usize = 10;
 const GENERATION_RETRY_AFTER_SECONDS: &str = "10";
-const LEGACY_TTS_PATH: &str = "/api/v1/tts";
-const LEGACY_SPEAKERS_PATH: &str = "/api/v1/speakers";
 
 pub(crate) struct AppState {
     pub(crate) config: Config,
@@ -98,6 +96,8 @@ async fn main() -> Result<()> {
 
     let api_path = format!("/api/{}/{{engine}}/tts", config.api_revision);
     let speakers_path = format!("/api/{}/{{engine}}/speakers", config.api_revision);
+    let first_engine_api_path = format!("/api/{}/tts", config.api_revision);
+    let first_engine_speakers_path = format!("/api/{}/speakers", config.api_revision);
     let listen = config.public_address()?;
     let admin_address = config.admin_address()?;
     let (shutdown_sender, shutdown_receiver) = watch::channel(false);
@@ -119,10 +119,10 @@ async fn main() -> Result<()> {
     let public_app = Router::new()
         .route(&api_path, get(generate_audio).post(generate_audio))
         .route(
-            LEGACY_TTS_PATH,
-            get(generate_legacy_audio).post(generate_legacy_audio),
+            &first_engine_api_path,
+            get(generate_first_engine_audio).post(generate_first_engine_audio),
         )
-        .route(LEGACY_SPEAKERS_PATH, get(get_legacy_speakers))
+        .route(&first_engine_speakers_path, get(get_first_engine_speakers))
         .route(&speakers_path, get(get_speakers))
         .route("/audio/{engine}/{filename}", get(get_audio))
         .layer(DefaultBodyLimit::disable())
@@ -250,15 +250,15 @@ async fn generate_audio(
     generate_audio_response(state.as_ref(), &engine_id, request).await
 }
 
-async fn generate_legacy_audio(
+async fn generate_first_engine_audio(
     State(state): State<Arc<AppState>>,
     Query(request): Query<TtsRequest>,
 ) -> Result<Response<Body>, AppError> {
-    let engine_id = legacy_engine_id(&state.config.engines);
+    let engine_id = first_engine_id(&state.config.engines);
     generate_audio_response(state.as_ref(), engine_id, request).await
 }
 
-fn legacy_engine_id(engines: &[EngineConfig]) -> &str {
+fn first_engine_id(engines: &[EngineConfig]) -> &str {
     &engines
         .first()
         .expect("設定検証によりEngineは1件以上あります")
@@ -389,8 +389,8 @@ pub(crate) async fn get_speakers(
     speakers_response(state.as_ref(), &engine_id)
 }
 
-async fn get_legacy_speakers(State(state): State<Arc<AppState>>) -> Response<Body> {
-    let engine_id = legacy_engine_id(&state.config.engines);
+async fn get_first_engine_speakers(State(state): State<Arc<AppState>>) -> Response<Body> {
+    let engine_id = first_engine_id(&state.config.engines);
     speakers_response(state.as_ref(), engine_id)
 }
 
@@ -579,11 +579,11 @@ mod tests {
     use tower::ServiceExt;
 
     use super::{
-        attribution_query, is_valid_audio_id, legacy_engine_id, make_audio_id,
+        attribution_query, first_engine_id, is_valid_audio_id, make_audio_id,
         normalize_public_paths, plain_text_url_response, public_audio_url, resolve_speaker_id,
         try_enter_generation_queue, with_noindex_header, AppError, EngineConfig,
         GenerationQueueFull, SpeakerAttribution, TtsRequest, GENERATION_RETRY_AFTER_SECONDS,
-        LEGACY_SPEAKERS_PATH, LEGACY_TTS_PATH, MAX_GENERATION_REQUESTS,
+        MAX_GENERATION_REQUESTS,
     };
 
     #[test]
@@ -607,7 +607,7 @@ mod tests {
     }
 
     #[test]
-    fn v1互換urlは設定順先頭のengineを使用する() {
+    fn engine指定なしurlは設定順先頭のengineを使用する() {
         let engines = [
             EngineConfig {
                 id: "aivisspeech".to_owned(),
@@ -627,9 +627,7 @@ mod tests {
             },
         ];
 
-        assert_eq!(LEGACY_TTS_PATH, "/api/v1/tts");
-        assert_eq!(LEGACY_SPEAKERS_PATH, "/api/v1/speakers");
-        assert_eq!(legacy_engine_id(&engines), "aivisspeech");
+        assert_eq!(first_engine_id(&engines), "aivisspeech");
     }
 
     #[tokio::test]
@@ -637,21 +635,21 @@ mod tests {
         let app = normalize_public_paths(
             Router::new()
                 .route(
-                    "/api/v1/{engine}/tts",
+                    "/api/v3/{engine}/tts",
                     get(StatusCode::OK).post(StatusCode::OK),
                 )
-                .route("/api/v1/{engine}/speakers", get(StatusCode::OK))
-                .route("/api/v1/tts", get(StatusCode::OK).post(StatusCode::OK))
-                .route(LEGACY_SPEAKERS_PATH, get(StatusCode::OK))
+                .route("/api/v3/{engine}/speakers", get(StatusCode::OK))
+                .route("/api/v3/tts", get(StatusCode::OK).post(StatusCode::OK))
+                .route("/api/v3/speakers", get(StatusCode::OK))
                 .route("/audio/{engine}/{filename}", get(StatusCode::OK)),
         );
         let requests = [
-            (Method::GET, "/api/v1/voicevox/tts/?text=test"),
-            (Method::POST, "/api/v1/voicevox/tts/?text=test"),
-            (Method::GET, "/api/v1/voicevox/speakers/"),
-            (Method::GET, "/api/v1/tts/?text=test"),
-            (Method::POST, "/api/v1/tts/?text=test"),
-            (Method::GET, "/api/v1/speakers/"),
+            (Method::GET, "/api/v3/voicevox/tts/?text=test"),
+            (Method::POST, "/api/v3/voicevox/tts/?text=test"),
+            (Method::GET, "/api/v3/voicevox/speakers/"),
+            (Method::GET, "/api/v3/tts/?text=test"),
+            (Method::POST, "/api/v3/tts/?text=test"),
+            (Method::GET, "/api/v3/speakers/"),
             (Method::GET, "/audio/voicevox/example.ogg/"),
         ];
 
@@ -675,13 +673,25 @@ mod tests {
             .oneshot(
                 Request::builder()
                     .method(Method::POST)
-                    .uri(LEGACY_SPEAKERS_PATH)
+                    .uri("/api/v3/speakers")
                     .body(Body::empty())
                     .unwrap(),
             )
             .await
             .unwrap();
         assert_eq!(response.status(), StatusCode::METHOD_NOT_ALLOWED);
+
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/v1/tts?text=test")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
 
         let response = app
             .oneshot(

@@ -29,25 +29,24 @@ GET /api/v3/aivisspeech/tts?text=%E3%81%93%E3%82%93%E3%81%AB%E3%81%A1%E3%81%AF&s
 - `text` はクエリパラメータで必須とする。
 - `speaker` はスタイル ID を表す文字列で、省略可能とする。
 - `text` と `speaker` は URL のクエリパラメータとしてパーセントエンコードする。
-- v1互換URLを除き、`api_revision` と `engine` は設定ファイルの値と完全一致するパスだけを有効とし、それ以外は `404 Not Found` とする。
+- `api_revision` と、Engine指定付きURLの `engine` は設定ファイルの値と完全一致するパスだけを有効とし、それ以外は `404 Not Found` とする。
 - `engine` は設定した TTS Engine の `id` とする。
 - `speaker` が省略されている場合、または対象 Engine から取得した話者一覧に存在しない場合は、その Engine の `default_id` を使用する。
 - いずれかの Engine の `default_id` が対象 Engine から取得した話者一覧に存在しない場合は起動エラーとする。
 - GET と POST は同じ動作とし、POST のリクエスト本文は使用しない。
 
-#### v1互換の音声生成
+#### Engine指定なしの音声生成
 
 ```http
-GET /api/v1/tts?text={読み上げるテキスト}&speaker={スタイルID}
-POST /api/v1/tts?text={読み上げるテキスト}&speaker={スタイルID}
+GET /api/{api_revision}/tts?text={読み上げるテキスト}&speaker={スタイルID}
+POST /api/{api_revision}/tts?text={読み上げるテキスト}&speaker={スタイルID}
 ```
 
-- EngineをURLで指定しない呼び出し用のパス互換経路として、`api_revision` の設定値にかかわらず固定で提供する。
+- EngineをURLで指定しない呼び出し用として、設定した `api_revision` のパスだけを提供する。
 - 対象Engineは `config.toml` の `engines` 配列の先頭とし、配列の並び替えにより対象も変わる。
 - クエリ、話者の解決、生成数制限、キャッシュ、エラーはEngine指定付きAPIと同じ処理を使用する。
 - 成功時は `/audio/{engine}/{audio_id}.ogg` 形式の正規URLを返す。
-- 利用情報のクエリは先頭Engineの `attribution` 設定に従い、`license` または `credit` を返す。旧応答形式の完全互換は保証しない。
-- 旧 `GET /speakers`、旧 `GET /audio/{audio_id}.ogg`、POSTのJSONリクエストおよびJSONレスポンスは互換対象に含めない。
+- 利用情報のクエリは先頭Engineの `attribution` 設定に従い、`license` または `credit` を返す。
 
 成功時は、実際に使用した話者の利用情報をクエリパラメータに含む音声 URL だけを、`Content-Type: text/plain; charset=utf-8` で返す。ライセンス名は `license`、必要なクレジット表記は `credit` とし、値はパーセントエンコードする。Engine の `attribution.type` に応じて、いずれか一方だけを必ず含める。
 
@@ -77,13 +76,13 @@ GET /api/{api_revision}/{engine}/speakers
 - `Content-Type: application/json` とする。
 - 起動中は同じ内容を返し、更新には仲介サーバーの再起動を必要とする。
 
-#### v1互換の話者一覧
+#### Engine指定なしの話者一覧
 
 ```http
-GET /api/v1/speakers
+GET /api/{api_revision}/speakers
 ```
 
-- `api_revision` の設定値にかかわらず固定で提供する。
+- 設定した `api_revision` のパスだけを提供する。
 - 対象Engineは `config.toml` の `engines` 配列の先頭とし、配列の並び替えにより対象も変わる。
 - Engine指定付きの話者一覧と同じ未加工のJSONおよび `Content-Type` を返す。
 - `GET /speakers` は提供しない。
@@ -428,7 +427,7 @@ POST /api/restart
 - `attribution` を省略した既存設定は `license_from_policy` として読み込む。新しい設定例では省略しない。
 - `attribution` を追加・変更しても音声内容は変わらないため、キャッシュは削除しない。
 - 既存設定でEngineの `attribution.type` を `credit` へ変更するか、`credit` のEngineを追加する場合は、Engineの種類にかかわらず `api_revision` を新しい値へ変更する。新しい設定例では `v3` を使用し、既存設定の値は自動変更しない。
-- 同一 API パスの意味や応答形式を破壊的に変更する場合は、運用者が `config.toml` の `api_revision` を変更してから再起動する。Engineセグメントなしの旧パスは、固定のv1互換URLだけを提供する。
+- 同一 API パスの意味や応答形式を破壊的に変更する場合は、運用者が `config.toml` の `api_revision` を変更してから再起動する。Engine指定の有無にかかわらず、公開APIは同じ `api_revision` を使用する。
 - `api_revision` は古い仕様の利用とバージョン番号だけによる誤接続を防ぐための値であり、認証情報としては扱わない。
 - 起動時に、音声内容へ影響する次の設定を前回起動時の値と比較する。
   - TTS Engine の接続先
