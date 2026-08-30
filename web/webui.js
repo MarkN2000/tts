@@ -41,8 +41,21 @@ function makeTtsRequestUrl(engine, text, speaker) {
 function parseTtsResponse(responseText) {
   const url = new URL(responseText, "http://localhost");
   const license = url.searchParams.get("license");
-  if (!responseText || !license) throw new Error("音声生成の応答が不正です");
-  return { url: responseText, license };
+  const credit = url.searchParams.get("credit");
+  if (!responseText || Boolean(license) === Boolean(credit)) {
+    throw new Error("音声生成の応答が不正です");
+  }
+  const attribution = license ? `ライセンス: ${license}` : `クレジット: ${credit}`;
+  return { url: responseText, attribution };
+}
+
+function showResult(result, fileName, targetElements) {
+  targetElements.attribution.textContent = result.attribution;
+  targetElements.audio.src = result.url;
+  targetElements.download.href = result.url;
+  targetElements.download.download = fileName;
+  targetElements.result.hidden = false;
+  playGeneratedAudio(targetElements.audio);
 }
 
 const elements = {
@@ -53,7 +66,7 @@ const elements = {
   text: document.querySelector("#text-input"),
   generate: document.querySelector("#generate-button"),
   result: document.querySelector("#result"),
-  license: document.querySelector("#license"),
+  attribution: document.querySelector("#attribution"),
   audio: document.querySelector("#audio-player"),
   download: document.querySelector("#download-link"),
 };
@@ -187,22 +200,13 @@ async function generateAudio(event) {
       selected?.dataset.styleName,
       text,
     );
-    showResult(result, fileName);
+    showResult(result, fileName, elements);
     setStatus("音声を生成しました");
   } catch (error) {
     setStatus(error.message || "音声を生成できませんでした", true);
   } finally {
     setGenerating(false);
   }
-}
-
-function showResult(result, fileName) {
-  elements.license.textContent = `ライセンス: ${result.license}`;
-  elements.audio.src = result.url;
-  elements.download.href = result.url;
-  elements.download.download = fileName;
-  elements.result.hidden = false;
-  playGeneratedAudio(elements.audio);
 }
 
 function setFormEnabled(enabled) {

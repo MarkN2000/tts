@@ -10,7 +10,7 @@ const source = fs.readFileSync(path.join(__dirname, "../web/webui.js"), "utf8")
   .split("\nconst elements = {")[0];
 const context = vm.createContext({ URL, URLSearchParams });
 vm.runInContext(
-  `${source}\nthis.makeFileName = makeDownloadFileName; this.playAudio = playGeneratedAudio; this.resizeTextArea = resizeTextArea; this.makeRequestUrl = makeTtsRequestUrl; this.parseResponse = parseTtsResponse;`,
+  `${source}\nthis.makeFileName = makeDownloadFileName; this.playAudio = playGeneratedAudio; this.resizeTextArea = resizeTextArea; this.makeRequestUrl = makeTtsRequestUrl; this.parseResponse = parseTtsResponse; this.showResult = showResult;`,
   context,
 );
 
@@ -127,12 +127,52 @@ test("プレーンテキストの音声URLからライセンスを取得する",
     "/audio/example.ogg?license=Aivis+Common+Model+License+%28ACML%29+1.0",
   );
   assert.equal(result.url, "/audio/example.ogg?license=Aivis+Common+Model+License+%28ACML%29+1.0");
-  assert.equal(result.license, "Aivis Common Model License (ACML) 1.0");
+  assert.equal(result.attribution, "ライセンス: Aivis Common Model License (ACML) 1.0");
 });
 
-test("ライセンスのない音声URLは不正な応答として拒否する", () => {
+test("プレーンテキストの音声URLからクレジットを取得する", () => {
+  const result = context.parseResponse(
+    "/audio/example.ogg?credit=VOICEVOX%3A%E3%81%9A%E3%82%93%E3%81%A0%E3%82%82%E3%82%93",
+  );
+  assert.equal(result.attribution, "クレジット: VOICEVOX:ずんだもん");
+});
+
+test("利用情報を生成結果に表示する", () => {
+  let playCount = 0;
+  const targetElements = {
+    attribution: { textContent: "" },
+    audio: {
+      src: "",
+      play() {
+        playCount += 1;
+        return { catch() {} };
+      },
+    },
+    download: { href: "", download: "" },
+    result: { hidden: true },
+  };
+  const result = context.parseResponse("/audio/example.ogg?credit=VOICEVOX%3Aずんだもん");
+
+  context.showResult(result, "voice.ogg", targetElements);
+
+  assert.equal(targetElements.attribution.textContent, "クレジット: VOICEVOX:ずんだもん");
+  assert.equal(targetElements.audio.src, result.url);
+  assert.equal(targetElements.download.href, result.url);
+  assert.equal(targetElements.download.download, "voice.ogg");
+  assert.equal(targetElements.result.hidden, false);
+  assert.equal(playCount, 1);
+});
+
+test("ライセンスとクレジットのない音声URLは不正な応答として拒否する", () => {
   assert.throws(
     () => context.parseResponse("/audio/example.ogg"),
+    /音声生成の応答が不正です/u,
+  );
+});
+
+test("ライセンスとクレジットの両方がある音声URLは不正な応答として拒否する", () => {
+  assert.throws(
+    () => context.parseResponse("/audio/example.ogg?license=Custom&credit=VOICEVOX"),
     /音声生成の応答が不正です/u,
   );
 });

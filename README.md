@@ -23,7 +23,7 @@ tts-server.exe  # Linuxでは tts-server
 config.toml
 ```
 
-`config.toml` の `[[engines]]`、`public_base_url` などを環境に合わせて変更し、実行ファイルを起動してください。各 Engine にはURLで使用する一意な `id`、表示用の `name`、TTS本体の `engine_url`、`default_id` を指定します。相対指定の `cache_dir` は、このディレクトリを基準にします。LAN内管理画面用の `admin_listen` には、管理画面を開く端末から接続できる、このPCのプライベートIPアドレスを指定します。
+`config.toml` の `[[engines]]`、`public_base_url` などを環境に合わせて変更し、実行ファイルを起動してください。各 Engine にはURLで使用する一意な `id`、表示用の `name`、TTS本体の `engine_url`、`default_id` を指定し、新規設定ではライセンスまたはクレジットの取得方式を表す `attribution` も指定します。相対指定の `cache_dir` は、このディレクトリを基準にします。LAN内管理画面用の `admin_listen` には、管理画面を開く端末から接続できる、このPCのプライベートIPアドレスを指定します。既存設定で `attribution` を省略した場合は従来どおりライセンス取得になります。
 
 配布する `config.toml` はAivisSpeech 1件だけを有効にし、VOICEVOXの追加例をコメントアウトで記載しています。VOICEVOXを起動して該当行のコメントを外すと、2台目として追加できます。設定したEngineはすべて起動時に接続確認され、1件でも利用できない場合はサーバーを起動しません。複数登録の例は [SPEC.md](SPEC.md#7-設定ファイル例) を参照してください。
 
@@ -42,11 +42,11 @@ config.toml
 GETとPOSTのどちらでも同じ結果を返します。
 
 ```console
-curl "http://127.0.0.1:8080/api/v2/aivisspeech/tts?text=%E3%81%93%E3%82%93%E3%81%AB%E3%81%A1%E3%81%AF&speaker=1878365376"
-curl -X POST "http://127.0.0.1:8080/api/v2/aivisspeech/tts?text=%E3%81%93%E3%82%93%E3%81%AB%E3%81%A1%E3%81%AF&speaker=1878365376"
+curl "http://127.0.0.1:8080/api/v3/aivisspeech/tts?text=%E3%81%93%E3%82%93%E3%81%AB%E3%81%A1%E3%81%AF&speaker=1878365376"
+curl -X POST "http://127.0.0.1:8080/api/v3/aivisspeech/tts?text=%E3%81%93%E3%82%93%E3%81%AB%E3%81%A1%E3%81%AF&speaker=1878365376"
 ```
 
-Engineを指定しない `/api/v1/tts` は互換URLとして、設定順の先頭Engineで生成します。リクエスト形式は上記と同じクエリ形式で、返却される音声URLはEngine IDを含む新形式です。旧音声URLと古いJSON形式には対応しません。
+Engineを指定しない `/api/v1/tts` はパス互換URLとして、設定順の先頭Engineで生成します。リクエスト形式は上記と同じクエリ形式で、返却される音声URLはEngine IDを含む新形式です。利用情報も先頭Engineの `attribution` 設定に従うため、旧応答形式の完全互換は保証しません。旧音声URLと古いJSON形式には対応しません。
 
 公開APIでは末尾の `/` があっても同じパスとして扱います。正規URLは末尾 `/` なしです。
 
@@ -54,12 +54,20 @@ Engineを指定しない `/api/v1/tts` は互換URLとして、設定順の先�
 https://tts.example.com/audio/aivisspeech/7f4a....ogg?license=Aivis+Common+Model+License+%28ACML%29+1.0
 ```
 
+`attribution.type = "license_from_policy"` ではモデルのライセンス名を `license`、`attribution.type = "credit"` では生成したクレジットを `credit` として音声URLへ含めます。
+
+```text
+https://tts.example.com/audio/voicevox/7f4a....ogg?credit=VOICEVOX%3A%E3%81%9A%E3%82%93%E3%81%A0%E3%82%82%E3%82%93
+```
+
+v0.5.3以前の設定は `attribution` を省略したままでも、従来どおり `license_from_policy` として読み込めます。既存設定でEngineの `attribution.type` を `credit` へ変更するか、`credit` のEngineを追加する場合は、Engineの種類にかかわらず `api_revision` も新しい値へ変更してください。今回の設定例は `v3` を使用します。VOICEVOXの例は `attribution = { type = "credit", template = "VOICEVOX:{speaker_name}" }` です。既存設定の `api_revision` は自動変更しません。
+
 返されたURLへGETすると、`audio/ogg` の音声を取得できます。
 
 話者ID・名前・スタイルは、起動時にEngineから取得した内容を返す次のAPIで確認できます。
 
 ```console
-curl http://127.0.0.1:8080/api/v2/aivisspeech/speakers
+curl http://127.0.0.1:8080/api/v3/aivisspeech/speakers
 ```
 
 Engineを指定しない `GET /api/v1/speakers` は、設定順の先頭Engineの話者一覧を返します。旧 `GET /speakers` は提供しません。

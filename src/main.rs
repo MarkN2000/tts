@@ -39,7 +39,7 @@ use crate::{
     cache::{cleanup_all, prepare_cache_root, AudioCache, CacheSignature},
     config::{Config, EngineConfig},
     converter::FfmpegConverter,
-    engine::{EngineClient, SpeakerMeta},
+    engine::{EngineClient, SpeakerAttribution},
     updater::UpdateManager,
 };
 
@@ -64,7 +64,7 @@ pub(crate) struct AppState {
 pub(crate) struct EngineState {
     pub(crate) config: EngineConfig,
     pub(crate) engine: EngineClient,
-    speakers: HashMap<String, SpeakerMeta>,
+    speakers: HashMap<String, SpeakerAttribution>,
     speakers_json: Bytes,
     pub(crate) cache: AudioCache,
 }
@@ -77,7 +77,7 @@ pub(crate) struct TtsRequest {
 
 pub(crate) struct GeneratedAudio {
     pub(crate) audio_id: String,
-    pub(crate) license: String,
+    pub(crate) attribution: SpeakerAttribution,
 }
 
 #[tokio::main]
@@ -177,7 +177,7 @@ async fn build_runtime(config: &Config) -> Result<(FfmpegConverter, HashMap<Stri
     for engine_config in &config.engines {
         let engine = EngineClient::new(engine_config.engine_url.clone());
         let speaker_catalog = engine
-            .load_speakers()
+            .load_speakers(engine_config.attribution.credit_template())
             .await
             .with_context(|| format!("Engine {} の話者一覧を取得できません", engine_config.id))?;
         if !speaker_catalog
@@ -275,7 +275,7 @@ async fn generate_audio_response(
         &state.config.public_base_url,
         engine_id,
         &generated.audio_id,
-        &generated.license,
+        &generated.attribution,
     );
     Ok(plain_text_url_response(url))
 }
@@ -284,18 +284,22 @@ fn public_audio_url(
     public_base_url: &str,
     engine_id: &str,
     audio_id: &str,
-    license: &str,
+    attribution: &SpeakerAttribution,
 ) -> String {
     format!(
         "{public_base_url}/audio/{engine_id}/{audio_id}.ogg?{}",
-        license_query(license)
+        attribution_query(attribution)
     )
 }
 
-pub(crate) fn license_query(license: &str) -> String {
+pub(crate) fn attribution_query(attribution: &SpeakerAttribution) -> String {
     let mut url = reqwest::Url::parse("http://localhost/").expect("固定URLは常に有効");
-    url.query_pairs_mut().append_pair("license", license);
-    url.query().expect("licenseクエリが存在する").to_owned()
+    let (key, value) = match attribution {
+        SpeakerAttribution::License(license) => ("license", license),
+        SpeakerAttribution::Credit(credit) => ("credit", credit),
+    };
+    url.query_pairs_mut().append_pair(key, value);
+    url.query().expect("利用情報のクエリが存在する").to_owned()
 }
 
 pub(crate) fn plain_text_url_response(url: String) -> Response<Body> {
@@ -364,7 +368,7 @@ pub(crate) async fn generate_cached_audio(
     let speaker = &engine.speakers[&speaker_id];
     Ok(GeneratedAudio {
         audio_id,
-        license: speaker.license.clone(),
+        attribution: speaker.clone(),
     })
 }
 
@@ -575,11 +579,11 @@ mod tests {
     use tower::ServiceExt;
 
     use super::{
-        is_valid_audio_id, legacy_engine_id, license_query, make_audio_id, normalize_public_paths,
-        plain_text_url_response, public_audio_url, resolve_speaker_id, try_enter_generation_queue,
-        with_noindex_header, AppError, EngineConfig, GenerationQueueFull, TtsRequest,
-        GENERATION_RETRY_AFTER_SECONDS, LEGACY_SPEAKERS_PATH, LEGACY_TTS_PATH,
-        MAX_GENERATION_REQUESTS,
+        attribution_query, is_valid_audio_id, legacy_engine_id, make_audio_id,
+        normalize_public_paths, plain_text_url_response, public_audio_url, resolve_speaker_id,
+        try_enter_generation_queue, with_noindex_header, AppError, EngineConfig,
+        GenerationQueueFull, SpeakerAttribution, TtsRequest, GENERATION_RETRY_AFTER_SECONDS,
+        LEGACY_SPEAKERS_PATH, LEGACY_TTS_PATH, MAX_GENERATION_REQUESTS,
     };
 
     #[test]
@@ -610,12 +614,16 @@ mod tests {
                 name: "AivisSpeech".to_owned(),
                 engine_url: "http://127.0.0.1:10101".to_owned(),
                 default_id: "1".to_owned(),
+                attribution: crate::config::AttributionConfig::LicenseFromPolicy,
             },
             EngineConfig {
                 id: "voicevox".to_owned(),
                 name: "VOICEVOX".to_owned(),
                 engine_url: "http://127.0.0.1:50021".to_owned(),
                 default_id: "3".to_owned(),
+                attribution: crate::config::AttributionConfig::Credit {
+                    template: "VOICEVOX:{speaker_name}".to_owned(),
+                },
             },
         ];
 
@@ -721,16 +729,38 @@ mod tests {
     #[test]
     fn 公開音声urlは公開用base_urlを使用する() {
         assert_eq!(
-            public_audio_url("https://tts.example.com", "aivisspeech", "audio-id", "CC0"),
+            public_audio_url(
+                "https://tts.example.com",
+                "aivisspeech",
+                "audio-id",
+                &SpeakerAttribution::License("CC0".to_owned()),
+            ),
             "https://tts.example.com/audio/aivisspeech/audio-id.ogg?license=CC0"
+        );
+        assert_eq!(
+            public_audio_url(
+                "https://tts.example.com",
+                "voicevox",
+                "audio-id",
+                &SpeakerAttribution::Credit("VOICEVOX:ずんだもん".to_owned()),
+            ),
+            "https://tts.example.com/audio/voicevox/audio-id.ogg?credit=VOICEVOX%3A%E3%81%9A%E3%82%93%E3%81%A0%E3%82%82%E3%82%93"
         );
     }
 
     #[test]
-    fn ライセンスはurlのクエリとしてエンコードする() {
+    fn 利用情報はurlのクエリとしてエンコードする() {
         assert_eq!(
-            license_query("Aivis Common Model License (ACML) 1.0 & CC0"),
+            attribution_query(&SpeakerAttribution::License(
+                "Aivis Common Model License (ACML) 1.0 & CC0".to_owned()
+            )),
             "license=Aivis+Common+Model+License+%28ACML%29+1.0+%26+CC0"
+        );
+        assert_eq!(
+            attribution_query(&SpeakerAttribution::Credit(
+                "VOICEVOX:ずんだもん".to_owned()
+            )),
+            "credit=VOICEVOX%3A%E3%81%9A%E3%82%93%E3%81%A0%E3%82%82%E3%82%93"
         );
     }
 

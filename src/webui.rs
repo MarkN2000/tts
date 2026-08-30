@@ -10,7 +10,7 @@ use axum::{
 };
 
 use crate::{
-    admin::static_response, generate_cached_audio, get_audio, get_speakers, license_query,
+    admin::static_response, attribution_query, generate_cached_audio, get_audio, get_speakers,
     plain_text_url_response, AppError, AppState, TtsRequest,
 };
 
@@ -53,26 +53,48 @@ async fn generate_audio(
         return Ok(StatusCode::NOT_FOUND.into_response());
     }
     let generated = generate_cached_audio(&state, &engine_id, request).await?;
-    let url = webui_audio_url(&engine_id, &generated.audio_id, &generated.license);
+    let url = webui_audio_url(&engine_id, &generated.audio_id, &generated.attribution);
     Ok(plain_text_url_response(url))
 }
 
-fn webui_audio_url(engine_id: &str, audio_id: &str, license: &str) -> String {
+fn webui_audio_url(
+    engine_id: &str,
+    audio_id: &str,
+    attribution: &crate::engine::SpeakerAttribution,
+) -> String {
     format!(
         "/audio/{engine_id}/{audio_id}.ogg?{}",
-        license_query(license)
+        attribution_query(attribution)
     )
 }
 
 #[cfg(test)]
 mod tests {
+    use crate::engine::SpeakerAttribution;
+
     use super::webui_audio_url;
 
     #[test]
     fn web_ui音声urlは管理画面と同一オリジンの相対パスにする() {
         assert_eq!(
-            webui_audio_url("aivisspeech", "audio-id", "CC0"),
+            webui_audio_url(
+                "aivisspeech",
+                "audio-id",
+                &SpeakerAttribution::License("CC0".to_owned())
+            ),
             "/audio/aivisspeech/audio-id.ogg?license=CC0"
+        );
+    }
+
+    #[test]
+    fn web_ui音声urlへクレジットを含める() {
+        assert_eq!(
+            webui_audio_url(
+                "voicevox",
+                "audio-id",
+                &SpeakerAttribution::Credit("VOICEVOX:ずんだもん".to_owned())
+            ),
+            "/audio/voicevox/audio-id.ogg?credit=VOICEVOX%3A%E3%81%9A%E3%82%93%E3%81%A0%E3%82%82%E3%82%93"
         );
     }
 }

@@ -23,7 +23,7 @@ POST /api/{api_revision}/{engine}/tts?text={読み上げるテキスト}&speaker
 例：
 
 ```http
-GET /api/v2/aivisspeech/tts?text=%E3%81%93%E3%82%93%E3%81%AB%E3%81%A1%E3%81%AF&speaker=1878365376
+GET /api/v3/aivisspeech/tts?text=%E3%81%93%E3%82%93%E3%81%AB%E3%81%A1%E3%81%AF&speaker=1878365376
 ```
 
 - `text` はクエリパラメータで必須とする。
@@ -42,16 +42,21 @@ GET /api/v1/tts?text={読み上げるテキスト}&speaker={スタイルID}
 POST /api/v1/tts?text={読み上げるテキスト}&speaker={スタイルID}
 ```
 
-- EngineをURLで指定しない旧クライアントとの互換用として、`api_revision` の設定値にかかわらず固定で提供する。
+- EngineをURLで指定しない呼び出し用のパス互換経路として、`api_revision` の設定値にかかわらず固定で提供する。
 - 対象Engineは `config.toml` の `engines` 配列の先頭とし、配列の並び替えにより対象も変わる。
 - クエリ、話者の解決、生成数制限、キャッシュ、エラーはEngine指定付きAPIと同じ処理を使用する。
 - 成功時は `/audio/{engine}/{audio_id}.ogg` 形式の正規URLを返す。
+- 利用情報のクエリは先頭Engineの `attribution` 設定に従い、`license` または `credit` を返す。旧応答形式の完全互換は保証しない。
 - 旧 `GET /speakers`、旧 `GET /audio/{audio_id}.ogg`、POSTのJSONリクエストおよびJSONレスポンスは互換対象に含めない。
 
-成功時は、実際に使用した話者のライセンスを `license` クエリパラメータに含む音声 URL だけを、`Content-Type: text/plain; charset=utf-8` で返す。ライセンス値はパーセントエンコードする。
+成功時は、実際に使用した話者の利用情報をクエリパラメータに含む音声 URL だけを、`Content-Type: text/plain; charset=utf-8` で返す。ライセンス名は `license`、必要なクレジット表記は `credit` とし、値はパーセントエンコードする。Engine の `attribution.type` に応じて、いずれか一方だけを必ず含める。
 
 ```text
 https://tts.example.com/audio/aivisspeech/7f4a....ogg?license=Aivis+Common+Model+License+%28ACML%29+1.0
+```
+
+```text
+https://tts.example.com/audio/voicevox/7f4a....ogg?credit=VOICEVOX%3A%E3%81%9A%E3%82%93%E3%81%A0%E3%82%82%E3%82%93
 ```
 
 ### 音声取得
@@ -120,8 +125,8 @@ GET /api/settings
     {
       "id": "aivisspeech",
       "name": "AivisSpeech",
-      "public_tts_url": "https://tts.example.com/api/v2/aivisspeech/tts",
-      "public_speakers_url": "https://tts.example.com/api/v2/aivisspeech/speakers"
+      "public_tts_url": "https://tts.example.com/api/v3/aivisspeech/tts",
+      "public_speakers_url": "https://tts.example.com/api/v3/aivisspeech/speakers"
     }
   ]
 }
@@ -180,11 +185,13 @@ GET /api/webui/{engine}/tts?text={読み上げるテキスト}&speaker={スタ�
 POST /api/webui/{engine}/tts?text={読み上げるテキスト}&speaker={スタイルID}
 ```
 
-リクエストと応答の形式は公開用の音声生成 API と同じとする。成功時は、実際に使用した話者のライセンスを `license` クエリパラメータに含む、管理画面と同一オリジンの相対音声 URL だけを返す。
+リクエストと応答の形式は公開用の音声生成 API と同じとする。成功時は、実際に使用した話者の `license` または `credit` をクエリパラメータに含む、管理画面と同一オリジンの相対音声 URL だけを返す。
 
 ```text
 /audio/aivisspeech/7f4a....ogg?license=Aivis+Common+Model+License+%28ACML%29+1.0
 ```
+
+Web UI は `license` を「ライセンス」、`credit` を「クレジット」として表示する。両方がある応答は不正とする。
 
 - 音声生成、キャッシュ、排他制御は公開用の音声生成 API と共通にする。
 - 応答は Ogg の生成と保存が完了してから返し、生成中の WAV は配信しない。
@@ -373,13 +380,14 @@ POST /api/restart
 
 ## 4. 話者
 
-- 起動時に各 TTS Engine の `/speakers` から利用可能な話者 ID、スタイル、`speaker_uuid` を取得する。
+- 起動時に各 TTS Engine の `/speakers` から利用可能な話者名、話者 ID、スタイル、`speaker_uuid` を取得する。
 - 各 Engine の `/speakers` の取得結果は生の JSON としてもメモリに保持し、公開用の話者一覧に使用する。
-- 各 `speaker_uuid` について `/speaker_info` を取得し、`policy` の先頭にある空でない Markdown 見出しから先頭の `#` を除いたライセンス名を自動取得する。
-- ライセンス名を取得できない場合は `Unknown` とする。
+- Engine の `attribution.type` が `credit` の場合は、`template` 内の `{speaker_name}` を `/speakers` の話者名に置き換えてクレジットを生成し、`/speaker_info` は取得しない。テンプレートに `{speaker_name}` がなければ、全話者で同じ固定クレジットを使用する。
+- Engine の `attribution.type` が `license_from_policy` の場合は、各 `speaker_uuid` について `/speaker_info` を取得し、`policy` の先頭にある空でない Markdown 見出しから先頭の `#` を除いたライセンス名を自動取得する。
+- `license_from_policy` でライセンス名を取得できない場合は `Unknown` とする。
 - 未登録 ID はエラーにせず、対象 Engine の `default_id` に置き換える。
-- 応答の `license` には、置き換え後に実際に使用した話者から取得したライセンス名を使用する。
-- 話者情報とライセンスは起動時に取得してメモリに保持し、再取得には仲介サーバーの再起動を必要とする。
+- 応答には、置き換え後に実際に使用した話者のライセンス名またはクレジットを使用する。
+- 話者情報、ライセンス、クレジットは起動時に取得または生成してメモリに保持し、再取得には仲介サーバーの再起動を必要とする。
 
 ## 5. キャッシュ
 
@@ -415,6 +423,11 @@ POST /api/restart
 - `engines` は1件以上とし、設定順の先頭を管理画面の既定Engineとする。
 - Engine の `id` は小文字英数字とハイフンだけを使用し、重複を許可しない。`name`、`engine_url`、`default_id` は空にできない。
 - `engine_url` は HTTP または HTTPS URL とし、末尾の `/` を除いて正規化する。正規化後の同一URLを複数Engineへ設定することはできない。
+- Engine の `attribution` は、`{ type = "license_from_policy" }` または `{ type = "credit", template = "..." }` とする。
+- `credit` の `template` は空にできない。話者名を挿入する場合は `{speaker_name}` を使用し、波括弧を使うプレースホルダーは `{speaker_name}` だけを許可する。
+- `attribution` を省略した既存設定は `license_from_policy` として読み込む。新しい設定例では省略しない。
+- `attribution` を追加・変更しても音声内容は変わらないため、キャッシュは削除しない。
+- 既存設定でEngineの `attribution.type` を `credit` へ変更するか、`credit` のEngineを追加する場合は、Engineの種類にかかわらず `api_revision` を新しい値へ変更する。新しい設定例では `v3` を使用し、既存設定の値は自動変更しない。
 - 同一 API パスの意味や応答形式を破壊的に変更する場合は、運用者が `config.toml` の `api_revision` を変更してから再起動する。Engineセグメントなしの旧パスは、固定のv1互換URLだけを提供する。
 - `api_revision` は古い仕様の利用とバージョン番号だけによる誤接続を防ぐための値であり、認証情報としては扱わない。
 - 起動時に、音声内容へ影響する次の設定を前回起動時の値と比較する。
@@ -435,7 +448,7 @@ POST /api/restart
 listen = "127.0.0.1:8080"
 admin_listen = "127.0.0.1:8081"
 public_base_url = "https://tts.example.com"
-api_revision = "v2"
+api_revision = "v3"
 
 cache_dir = "./cache"
 cache_days = 7
@@ -451,12 +464,14 @@ id = "aivisspeech"
 name = "AivisSpeech"
 engine_url = "http://127.0.0.1:10101"
 default_id = "1878365376"
+attribution = { type = "license_from_policy" }
 
 [[engines]]
 id = "voicevox"
 name = "VOICEVOX"
 engine_url = "http://127.0.0.1:50021"
 default_id = "3"
+attribution = { type = "credit", template = "VOICEVOX:{speaker_name}" }
 ```
 
 ## 8. 配布と実行条件

@@ -36,6 +36,27 @@ pub struct EngineConfig {
     pub name: String,
     pub engine_url: String,
     pub default_id: String,
+    #[serde(default)]
+    pub attribution: AttributionConfig,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq)]
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
+pub enum AttributionConfig {
+    #[default]
+    LicenseFromPolicy,
+    Credit {
+        template: String,
+    },
+}
+
+impl AttributionConfig {
+    pub fn credit_template(&self) -> Option<&str> {
+        match self {
+            Self::LicenseFromPolicy => None,
+            Self::Credit { template } => Some(template),
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -166,6 +187,14 @@ impl Config {
             if engine.default_id.is_empty() {
                 bail!("engines の default_id は空にできません: {}", engine.id);
             }
+            if let AttributionConfig::Credit { template } = &engine.attribution {
+                if !is_valid_credit_template(template) {
+                    bail!(
+                        "engines の attribution.template は空にできず、{{speaker_name}} 以外のプレースホルダーを使用できません: {}",
+                        engine.id
+                    );
+                }
+            }
 
             let url = reqwest::Url::parse(&engine.engine_url).with_context(|| {
                 format!("engines の engine_url がURLとして不正です: {}", engine.id)
@@ -188,12 +217,21 @@ impl Config {
     }
 }
 
-const VOICEVOX_EXAMPLE: &str = r#"# VOICEVOXも追加する場合は、VOICEVOXを起動してから次の5行のコメントを外してください。
+fn is_valid_credit_template(template: &str) -> bool {
+    if template.trim().is_empty() {
+        return false;
+    }
+    let literal = template.replace("{speaker_name}", "");
+    !literal.contains('{') && !literal.contains('}')
+}
+
+const VOICEVOX_EXAMPLE: &str = r#"# VOICEVOXも追加する場合は、VOICEVOXを起動してから次の6行のコメントを外してください。
 # [[engines]]
 # id = "voicevox"
 # name = "VOICEVOX"
 # engine_url = "http://127.0.0.1:50021"
 # default_id = "3"
+# attribution = { type = "credit", template = "VOICEVOX:{speaker_name}" }
 "#;
 
 /// 旧形式を検出して新形式の候補を返す。新形式は変更せずに `None` を返す。
@@ -392,7 +430,7 @@ mod tests {
         time::{SystemTime, UNIX_EPOCH},
     };
 
-    use super::{is_private_or_local, AudioCodec, Config, EngineConfig};
+    use super::{is_private_or_local, AttributionConfig, AudioCodec, Config, EngineConfig};
 
     static TEST_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
@@ -419,6 +457,7 @@ mod tests {
             name: "テストEngine".to_owned(),
             engine_url: engine_url.to_owned(),
             default_id: "1".to_owned(),
+            attribution: AttributionConfig::LicenseFromPolicy,
         }
     }
 
@@ -545,6 +584,64 @@ default_id = "1878365376"
     }
 
     #[test]
+    fn attributionのクレジットテンプレートを検証する() {
+        let mut voicevox = engine("voicevox", "http://127.0.0.1:50021");
+        voicevox.attribution = AttributionConfig::Credit {
+            template: "VOICEVOX:{speaker_name}".to_owned(),
+        };
+        assert!(config(vec![voicevox.clone()]).validate().is_ok());
+
+        voicevox.attribution = AttributionConfig::Credit {
+            template: "VOICEVOX".to_owned(),
+        };
+        assert!(config(vec![voicevox.clone()]).validate().is_ok());
+
+        voicevox.attribution = AttributionConfig::Credit {
+            template: "VOICEVOX:{speaker_name}:{speaker_id}".to_owned(),
+        };
+        assert!(config(vec![voicevox.clone()])
+            .validate()
+            .unwrap_err()
+            .to_string()
+            .contains("プレースホルダー"));
+
+        voicevox.attribution = AttributionConfig::Credit {
+            template: String::new(),
+        };
+        assert!(config(vec![voicevox])
+            .validate()
+            .unwrap_err()
+            .to_string()
+            .contains("attribution.template"));
+    }
+
+    #[test]
+    fn attributionを省略した既存設定はライセンス取得になる() {
+        let config = 設定ファイルを読み込む(新形式の設定()).unwrap();
+
+        assert_eq!(
+            config.engines[0].attribution,
+            AttributionConfig::LicenseFromPolicy
+        );
+    }
+
+    #[test]
+    fn attributionを明示した設定を読み込める() {
+        let source = 新形式の設定().replace(
+            "default_id = \"1878365376\"",
+            "default_id = \"1878365376\"\nattribution = { type = \"credit\", template = \"VOICEVOX:{speaker_name}\" }",
+        );
+        let config = 設定ファイルを読み込む(&source).unwrap();
+
+        assert_eq!(
+            config.engines[0].attribution,
+            AttributionConfig::Credit {
+                template: "VOICEVOX:{speaker_name}".to_owned()
+            }
+        );
+    }
+
+    #[test]
     fn engine_idの重複を拒否する() {
         let config = config(vec![
             engine("voicevox", "http://127.0.0.1:50021"),
@@ -606,6 +703,10 @@ default_id = "1878365376"
             assert_eq!(config.engines.len(), 1);
             assert_eq!(config.engines[0].id, "aivisspeech");
             assert_eq!(config.engines[0].name, "AivisSpeech");
+            assert_eq!(
+                config.engines[0].attribution,
+                AttributionConfig::LicenseFromPolicy
+            );
 
             let migrated = fs::read_to_string(path).unwrap();
             assert!(migrated.contains("# 利用者が書いたコメントは維持する"));
@@ -613,6 +714,9 @@ default_id = "1878365376"
             assert!(migrated.contains("# 接続先のコメントも維持する"));
             assert!(migrated.contains("# 既定話者のコメントも維持する"));
             assert!(migrated.contains("# [[engines]]"));
+            assert!(migrated.contains(
+                "# attribution = { type = \"credit\", template = \"VOICEVOX:{speaker_name}\" }"
+            ));
             let document = migrated.parse::<toml_edit::DocumentMut>().unwrap();
             assert!(document.get("engine_url").is_none());
             assert!(document.get("default_id").is_none());

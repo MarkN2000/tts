@@ -557,6 +557,7 @@ mod tests {
                 name: "AivisSpeech".to_owned(),
                 engine_url: "http://127.0.0.1:10101".to_owned(),
                 default_id: "1".to_owned(),
+                attribution: crate::config::AttributionConfig::LicenseFromPolicy,
             }],
         );
 

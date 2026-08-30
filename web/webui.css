@@ -103,7 +103,7 @@ button:focus-visible, select:focus-visible, textarea:focus-visible, a:focus-visi
 .primary:hover:not(:disabled) { background: var(--accent-hover); }
 .primary:disabled { cursor: wait; opacity: .6; }
 
-.license { margin-bottom: 14px; color: var(--muted); font-size: .9rem; }
+.attribution { margin-bottom: 14px; color: var(--muted); font-size: .9rem; }
 
 audio { width: 100%; }
 

@@ -15,12 +15,13 @@ pub struct EngineClient {
 }
 
 #[derive(Clone, Debug)]
-pub struct SpeakerMeta {
-    pub license: String,
+pub enum SpeakerAttribution {
+    License(String),
+    Credit(String),
 }
 
 pub struct SpeakerCatalog {
-    pub speakers: HashMap<String, SpeakerMeta>,
+    pub speakers: HashMap<String, SpeakerAttribution>,
     pub raw_json: Vec<u8>,
 }
 
@@ -32,6 +33,7 @@ pub enum UserDictPreviewError {
 
 #[derive(Debug, Deserialize)]
 struct Speaker {
+    name: Option<String>,
     speaker_uuid: String,
     styles: Vec<Style>,
 }
@@ -54,7 +56,7 @@ impl EngineClient {
         }
     }
 
-    pub async fn load_speakers(&self) -> Result<SpeakerCatalog> {
+    pub async fn load_speakers(&self, credit_template: Option<&str>) -> Result<SpeakerCatalog> {
         let raw_json = self
             .client
             .get(format!("{}/speakers", self.base_url))
@@ -74,21 +76,30 @@ impl EngineClient {
         let mut result = HashMap::new();
 
         for speaker in speakers {
-            let license = if let Some(license) = licenses.get(&speaker.speaker_uuid) {
-                license.clone()
+            let attribution = if let Some(template) = credit_template {
+                let credit = if template.contains("{speaker_name}") {
+                    let speaker_name = speaker
+                        .name
+                        .as_deref()
+                        .filter(|name| !name.is_empty())
+                        .with_context(|| {
+                            format!("Engine の話者名が空です: {}", speaker.speaker_uuid)
+                        })?;
+                    render_credit(template, speaker_name)
+                } else {
+                    template.to_owned()
+                };
+                SpeakerAttribution::Credit(credit)
+            } else if let Some(license) = licenses.get(&speaker.speaker_uuid) {
+                SpeakerAttribution::License(license.clone())
             } else {
                 let license = self.load_license(&speaker.speaker_uuid).await?;
                 licenses.insert(speaker.speaker_uuid.clone(), license.clone());
-                license
+                SpeakerAttribution::License(license)
             };
 
             for style in speaker.styles {
-                result.insert(
-                    style.id.to_string(),
-                    SpeakerMeta {
-                        license: license.clone(),
-                    },
-                );
+                result.insert(style.id.to_string(), attribution.clone());
             }
         }
 
@@ -268,6 +279,10 @@ impl EngineClient {
     }
 }
 
+fn render_credit(template: &str, speaker_name: &str) -> String {
+    template.replace("{speaker_name}", speaker_name)
+}
+
 fn apply_user_dict_preview_accent(
     audio_query: &mut Value,
     pronunciation: &str,
@@ -382,9 +397,147 @@ fn extract_license_heading(policy: &str) -> Option<&str> {
 
 #[cfg(test)]
 mod tests {
-    use serde_json::json;
+    use std::sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    };
 
-    use super::{apply_user_dict_preview_accent, extract_license_heading, UserDictPreviewError};
+    use axum::{
+        http::{header::CONTENT_TYPE, StatusCode},
+        routing::get,
+        Json, Router,
+    };
+    use serde_json::json;
+    use tokio::net::TcpListener;
+    use tokio::task::JoinHandle;
+
+    use super::{
+        apply_user_dict_preview_accent, extract_license_heading, EngineClient, UserDictPreviewError,
+    };
+
+    async fn test_client(app: Router) -> (EngineClient, JoinHandle<()>) {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+        (EngineClient::new(format!("http://{address}")), server)
+    }
+
+    #[tokio::test]
+    async fn credit_templateは話者名から生成しspeaker_infoを取得しない() {
+        const RAW_SPEAKERS: &str = r#"[ { "name": "ずんだもん", "speaker_uuid": "speaker-uuid", "styles": [ { "id": 3 }, { "id": 1 } ] } ]"#;
+        let speaker_info_calls = Arc::new(AtomicUsize::new(0));
+        let calls = Arc::clone(&speaker_info_calls);
+        let app = Router::new()
+            .route(
+                "/speakers",
+                get(|| async { ([(CONTENT_TYPE, "application/json")], RAW_SPEAKERS) }),
+            )
+            .route(
+                "/speaker_info",
+                get(move || {
+                    calls.fetch_add(1, Ordering::Relaxed);
+                    async { StatusCode::INTERNAL_SERVER_ERROR }
+                }),
+            );
+        let (client, server) = test_client(app).await;
+
+        let catalog = client
+            .load_speakers(Some("VOICEVOX:{speaker_name}"))
+            .await
+            .unwrap();
+
+        for style_id in ["1", "3"] {
+            let speaker = &catalog.speakers[style_id];
+            assert!(matches!(
+                speaker,
+                super::SpeakerAttribution::Credit(credit) if credit == "VOICEVOX:ずんだもん"
+            ));
+        }
+        assert_eq!(speaker_info_calls.load(Ordering::Relaxed), 0);
+        assert_eq!(catalog.raw_json, RAW_SPEAKERS.as_bytes());
+        server.abort();
+    }
+
+    #[tokio::test]
+    async fn credit_templateなしではspeaker_infoからライセンスを取得する() {
+        const RAW_SPEAKERS: &str =
+            r#"[{"name":"モデル","speaker_uuid":"speaker-uuid","styles":[{"id":1},{"id":2}]}]"#;
+        let speaker_info_calls = Arc::new(AtomicUsize::new(0));
+        let calls = Arc::clone(&speaker_info_calls);
+        let app = Router::new()
+            .route(
+                "/speakers",
+                get(|| async { ([(CONTENT_TYPE, "application/json")], RAW_SPEAKERS) }),
+            )
+            .route(
+                "/speaker_info",
+                get(move || {
+                    calls.fetch_add(1, Ordering::Relaxed);
+                    async { Json(json!({ "policy": "## Aivis Common Model License 1.0\n本文" })) }
+                }),
+            );
+        let (client, server) = test_client(app).await;
+
+        let catalog = client.load_speakers(None).await.unwrap();
+
+        for style_id in ["1", "2"] {
+            let speaker = &catalog.speakers[style_id];
+            assert!(matches!(
+                speaker,
+                super::SpeakerAttribution::License(license)
+                    if license == "Aivis Common Model License 1.0"
+            ));
+        }
+        assert_eq!(speaker_info_calls.load(Ordering::Relaxed), 1);
+        assert_eq!(catalog.raw_json, RAW_SPEAKERS.as_bytes());
+        server.abort();
+    }
+
+    #[tokio::test]
+    async fn credit_template使用時は空の話者名を拒否する() {
+        let app = Router::new().route(
+            "/speakers",
+            get(|| async {
+                Json(json!([{
+                    "speaker_uuid": "speaker-uuid",
+                    "styles": [{ "id": 3 }]
+                }]))
+            }),
+        );
+        let (client, server) = test_client(app).await;
+
+        let error = match client.load_speakers(Some("VOICEVOX:{speaker_name}")).await {
+            Ok(_) => panic!("空の話者名を受理しました"),
+            Err(error) => error,
+        };
+
+        assert!(error.to_string().contains("話者名"));
+        server.abort();
+    }
+
+    #[tokio::test]
+    async fn 固定credit_templateは話者名を必要としない() {
+        let app = Router::new().route(
+            "/speakers",
+            get(|| async {
+                Json(json!([{
+                    "speaker_uuid": "speaker-uuid",
+                    "styles": [{ "id": 3 }]
+                }]))
+            }),
+        );
+        let (client, server) = test_client(app).await;
+
+        let catalog = client.load_speakers(Some("VOICEVOX")).await.unwrap();
+
+        assert!(matches!(
+            &catalog.speakers["3"],
+            super::SpeakerAttribution::Credit(credit) if credit == "VOICEVOX"
+        ));
+        server.abort();
+    }
 
     #[test]
     fn markdownの最初の見出しを取得する() {
