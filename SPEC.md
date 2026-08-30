@@ -487,6 +487,7 @@ config.toml
 - キャッシュディレクトリは初回起動時に作成する。
 - FFmpeg、設定、TTS Engine への接続と話者情報の取得を起動時に確認し、利用できない場合は起動エラーとする。
 - GitHub Release には、通常の Linux x86_64 用 tar.gz に加えて、自己更新用の固定名 `tts-server-linux-x86_64` を添付する。
+- リリースタグ `v{version}` のバージョンは `Cargo.toml` と完全一致させ、ビルド前にCIで検証する。
 
 ## 9. アクセス制限
 

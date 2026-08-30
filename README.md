@@ -103,7 +103,7 @@ cargo clippy --all-targets -- -D warnings
 
 ## リリース
 
-`v` で始まるタグをGitHubへpushすると、GitHub Actionsが次の配布物を自動作成し、GitHub Releaseへ添付します。
+`Cargo.toml` と同じバージョンの `v` タグをGitHubへpushすると、GitHub Actionsが次の配布物を作成します。
 
 - Windows x86_64: ZIP
 - Linux x86_64: musl静的リンクのtar.gzと、自己更新用raw実行ファイル

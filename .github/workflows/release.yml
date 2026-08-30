@@ -9,8 +9,20 @@ permissions:
   contents: read
 
 jobs:
+  verify-version:
+    name: Verify release version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Match tag and package version
+        run: |
+          package_version="$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | select(.name == "tts-server") | .version')"
+          test "v${package_version}" = "$GITHUB_REF_NAME"
+
   build-windows:
     name: Build Windows x86_64
+    needs: verify-version
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v7
@@ -42,6 +54,7 @@ jobs:
 
   build-linux:
     name: Build Linux x86_64
+    needs: verify-version
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
