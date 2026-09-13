@@ -416,7 +416,7 @@ POST /api/restart
 - 旧形式は `id = "aivisspeech"`、`name = "AivisSpeech"` の1 Engineへ変換し、`api_revision` は旧設定の値を維持する。旧設定でVOICEVOXを使用していた場合は、移行後に `id` と `name` を運用者が変更できる。
 - 旧形式と新形式が混在する場合、または旧形式の必須項目が片方だけの場合は、設定を変更せず起動エラーとする。
 - 移行内容を新形式として検証してから、一時ファイルの同期と原子的な置換で `config.toml` を更新する。失敗時は元の設定を維持する。
-- 移行前の設定は元のバイト列のまま `config.toml.pre-engines` へ1世代保存し、ロールバックに使用できるようにする。既に同名のバックアップがあり現在の旧設定と一致する場合は中断された移行の再試行として再利用し、内容が異なる場合は上書きせず、設定を変更しないで起動エラーとする。通常の新形式読み込みでは設定を書き換えない。
+- 移行前の設定は元のバイト列のまま `config.toml.pre-engines` へ1世代保存し、ロールバックに使用できるようにする。既に同名のバックアップがあり現在の旧設定と一致する場合は中断された移行の再試行として再利用し、内容が異なる場合は上書きせず、設定を変更しないで起動エラーとする。新形式では下記VOICEVOX設定の補完時だけ書き換える。
 - `api_revision` は `v1`、`v2` のように公開 API のリビジョンを表す値とする。
 - `listen` はポート番号が1以上のIPアドレスとポートで指定する。公開範囲に関するIPアドレスの制限は設けない。
 - `engines` は1件以上とし、設定順の先頭を管理画面の既定Engineとする。
@@ -424,9 +424,9 @@ POST /api/restart
 - `engine_url` は HTTP または HTTPS URL とし、末尾の `/` を除いて正規化する。正規化後の同一URLを複数Engineへ設定することはできない。
 - Engine の `attribution` は、`{ type = "license_from_policy" }` または `{ type = "credit", template = "..." }` とする。
 - `credit` の `template` は空にできない。話者名を挿入する場合は `{speaker_name}` を使用し、波括弧を使うプレースホルダーは `{speaker_name}` だけを許可する。
-- `attribution` を省略した既存設定は `license_from_policy` として読み込む。新しい設定例では省略しない。
+- `[[engines]]` の `id = "voicevox"` で `attribution` が未設定の場合、設定読み込み時に `{ type = "credit", template = "VOICEVOX:{speaker_name}" }` を追記する。設定全体を検証してから既存の原子的保存処理で確定する。設定済みの値、他のEngine、`api_revision`、既存の移行バックアップは変更しない。それ以外の省略は `license_from_policy` とする。
 - `attribution` を追加・変更しても音声内容は変わらないため、キャッシュは削除しない。
-- 既存設定でEngineの `attribution.type` を `credit` へ変更するか、`credit` のEngineを追加する場合は、Engineの種類にかかわらず `api_revision` を新しい値へ変更する。新しい設定例では `v3` を使用し、既存設定の値は自動変更しない。
+- 手動でEngineの `attribution.type` を `credit` へ変更するか、`credit` のEngineを追加する場合は `api_revision` を新しい値へ変更する。VOICEVOXの未設定補完では既存URLを維持するため変更せず、応答は `license=Unknown` から `credit=VOICEVOX:話者名` に変わる。新しい設定例では `v3` を使用する。
 - 同一 API パスの意味や応答形式を破壊的に変更する場合は、運用者が `config.toml` の `api_revision` を変更してから再起動する。Engine指定の有無にかかわらず、公開APIは同じ `api_revision` を使用する。
 - `api_revision` は古い仕様の利用とバージョン番号だけによる誤接続を防ぐための値であり、認証情報としては扱わない。
 - 起動時に、音声内容へ影響する次の設定を前回起動時の値と比較する。

@@ -45,7 +45,7 @@ Engineを省略した `/api/{api_revision}/tts` と `/api/{api_revision}/speaker
 https://tts.example.com/audio/aivisspeech/7f4a....ogg?license=Aivis+Common+Model+License+%28ACML%29+1.0
 ```
 
-`license_from_policy` はライセンス名を `license`、`credit` は生成したクレジットを `credit` として音声URLへ含めます。既存設定で `attribution` を省略すると `license_from_policy` になります。`credit` を追加・変更する場合は `api_revision` も新しい値へ変更してください。
+`license_from_policy` はライセンス名を `license`、`credit` はクレジットを `credit` として音声URLへ含めます。`id = "voicevox"` で `attribution` が未設定なら、起動時にVOICEVOX用クレジット設定を自動追記します。設定済みの値と `api_revision` は維持します。他のEngineで省略した場合は `license_from_policy` になります。
 
 話者一覧は次のAPIで確認できます。
 

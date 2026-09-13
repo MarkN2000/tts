@@ -84,9 +84,11 @@ impl Config {
 
         let migrated_source = legacy_migration_source(source)?;
         let candidate = migrated_source.as_deref().unwrap_or(source);
+        let credit_source = voicevox_credit_source(candidate)?;
+        let candidate = credit_source.as_deref().unwrap_or(candidate);
         let config = Self::from_source(path, candidate)?;
-        if let Some(migrated_source) = migrated_source {
-            write_migrated_config(path, &original_bytes, &migrated_source)?;
+        if migrated_source.is_some() || credit_source.is_some() {
+            write_migrated_config(path, &original_bytes, candidate, migrated_source.is_some())?;
         }
         Ok(config)
     }
@@ -283,7 +285,34 @@ fn legacy_migration_source(source: &str) -> Result<Option<String>> {
     Ok(Some(migrated))
 }
 
-fn write_migrated_config(path: &Path, original_bytes: &[u8], migrated_source: &str) -> Result<()> {
+fn voicevox_credit_source(source: &str) -> Result<Option<String>> {
+    let mut document = DocumentMut::from_str(source).context("設定ファイルがTOMLとして不正です")?;
+    let mut changed = false;
+    if let Some(engines) = document
+        .get_mut("engines")
+        .and_then(Item::as_array_of_tables_mut)
+    {
+        for engine in engines.iter_mut() {
+            if engine.get("id").and_then(Item::as_str) == Some("voicevox")
+                && !engine.contains_key("attribution")
+            {
+                let mut attribution = toml_edit::InlineTable::new();
+                attribution.insert("type", "credit".into());
+                attribution.insert("template", "VOICEVOX:{speaker_name}".into());
+                engine["attribution"] = value(attribution);
+                changed = true;
+            }
+        }
+    }
+    Ok(changed.then(|| document.to_string()))
+}
+
+fn write_migrated_config(
+    path: &Path,
+    original_bytes: &[u8],
+    migrated_source: &str,
+    backup_legacy: bool,
+) -> Result<()> {
     let directory = path
         .parent()
         .context("設定ファイルのディレクトリを取得できません")?;
@@ -301,9 +330,11 @@ fn write_migrated_config(path: &Path, original_bytes: &[u8], migrated_source: &s
 
     let metadata = fs::metadata(path)
         .with_context(|| format!("設定ファイル {path:?} の権限を取得できません"))?;
-    ensure_migration_backup(&backup, original_bytes, metadata.permissions())
-        .with_context(|| format!("移行前の設定を {} へ保存できません", backup.display()))?;
-    sync_directory(directory)?;
+    if backup_legacy {
+        ensure_migration_backup(&backup, original_bytes, metadata.permissions())
+            .with_context(|| format!("移行前の設定を {} へ保存できません", backup.display()))?;
+        sync_directory(directory)?;
+    }
 
     let (temporary, mut temporary_file) = create_temporary_file(directory, file_name)?;
     let result = (|| -> Result<()> {
@@ -613,6 +644,38 @@ default_id = "1878365376"
             .unwrap_err()
             .to_string()
             .contains("attribution.template"));
+    }
+
+    #[test]
+    fn voicevoxの未設定creditだけを保存して再読み込みできる() {
+        let source = 新形式の設定().replace("id = \"aivisspeech\"", "id = \"voicevox\"");
+        読み込み後に後始末(&source, |path, result| {
+            let config = result.unwrap();
+            assert_eq!(config.api_revision, "v2");
+            assert_eq!(
+                config.engines[0].attribution.credit_template(),
+                Some("VOICEVOX:{speaker_name}")
+            );
+            let saved = fs::read_to_string(path).unwrap();
+            Config::load(path).unwrap();
+            assert_eq!(fs::read_to_string(path).unwrap(), saved);
+            assert!(!path.with_file_name("config.toml.pre-engines").exists());
+        });
+        for attribution in [
+            "{ type = \"license_from_policy\" }",
+            "{ type = \"credit\", template = \"独自表記\" }",
+        ] {
+            let explicit = format!("{source}\nattribution = {attribution}\n");
+            読み込み後に後始末(&explicit, |path, result| {
+                result.unwrap();
+                assert_eq!(fs::read_to_string(path).unwrap(), explicit);
+            });
+        }
+        let invalid = source.replace("bitrate_kbps = 48", "bitrate_kbps = 0");
+        読み込み後に後始末(&invalid, |path, result| {
+            assert!(result.is_err());
+            assert_eq!(fs::read_to_string(path).unwrap(), invalid);
+        });
     }
 
     #[test]
